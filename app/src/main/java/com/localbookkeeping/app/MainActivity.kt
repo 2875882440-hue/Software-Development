@@ -2858,19 +2858,27 @@ private fun StatisticsScreen(
         }
         when (rangeType) {
             StatsRangeType.WEEK -> {
-                items(weekArchives, key = { it.label }) { archive ->
-                    ArchivePeriodCard(archive)
+                if (weekArchives.isEmpty()) {
+                    item { EmptyStatsCard("暂无周统计数据") }
+                } else {
+                    items(weekArchives, key = { it.label }) { archive ->
+                        ArchivePeriodCard(archive)
+                    }
                 }
             }
             StatsRangeType.MONTH -> {
-                items(monthArchives, key = { it.label }) { archive ->
-                    ArchivePeriodCard(archive)
+                if (monthArchives.isEmpty()) {
+                    item { EmptyStatsCard("暂无月度统计数据") }
+                } else {
+                    items(monthArchives, key = { it.label }) { archive ->
+                        ArchivePeriodCard(archive)
+                    }
                 }
             }
             else -> {
                 item { StatisticsSummaryCard(stats) }
-                item { SummaryListCard("分类汇总", stats.categoryItems) }
-                item { SummaryListCard("来源汇总", stats.sourceItems) }
+                item { SummaryListCard("分类汇总", stats.categoryItems, "暂无分类统计") }
+                item { SummaryListCard("来源汇总", stats.sourceItems, "暂无来源统计") }
                 item {
                     Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -2883,12 +2891,28 @@ private fun StatisticsScreen(
                         }
                     }
                 }
-                items(stats.groups, key = { it.label }) { group ->
-                    BillGroupCard(group)
+                if (stats.groups.isEmpty()) {
+                    item { EmptyStatsCard(if (rangeType == StatsRangeType.TODAY) "今日暂无账单" else "暂无数据") }
+                } else {
+                    items(stats.groups, key = { it.label }) { group ->
+                        BillGroupCard(group)
+                    }
                 }
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun EmptyStatsCard(text: String) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+        Text(
+            text = text,
+            modifier = Modifier.fillMaxWidth().padding(24.dp),
+            color = MutedText,
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -2941,8 +2965,8 @@ private fun ArchivePeriodCard(archive: com.localbookkeeping.app.stats.ArchivePer
             }
             if (expanded) {
                 StatisticsSummaryCard(stats)
-                SummaryListCard("分类汇总", stats.categoryItems)
-                SummaryListCard("来源汇总", stats.sourceItems)
+                SummaryListCard("分类汇总", stats.categoryItems, "暂无分类统计")
+                SummaryListCard("来源汇总", stats.sourceItems, "暂无来源统计")
                 if (stats.groups.isEmpty()) {
                     Text("暂无账单",  color = MutedText, fontSize = 13.sp)
                 } else {
@@ -2956,12 +2980,16 @@ private fun ArchivePeriodCard(archive: com.localbookkeeping.app.stats.ArchivePer
 }
 
 @Composable
-private fun SummaryListCard(title: String, items: List<com.localbookkeeping.app.stats.SummaryItem>) {
+private fun SummaryListCard(
+    title: String,
+    items: List<com.localbookkeeping.app.stats.SummaryItem>,
+    emptyText: String = "暂无数据"
+) {
     Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, color = PrimaryText, fontWeight = FontWeight.Bold)
             if (items.isEmpty()) {
-                Text("暂无数据", color = MutedText, fontSize = 13.sp)
+                Text(emptyText, color = MutedText, fontSize = 13.sp)
             } else {
                 items.forEach {
                     HealthStatusRow(it.label, "${formatMoney(it.amountCents)} / ${it.count} 笔 / ${"%.1f".format(it.percent * 100)}%")
@@ -4799,7 +4827,7 @@ private const val WECHAT_PACKAGE = "com.tencent.mm"
 private const val ALIPAY_PACKAGE = "com.eg.android.AlipayGphone"
 private const val NORMAL_TEST_WINDOW_MILLIS = 30_000L
 private const val PAYMENT_TEST_WINDOW_MILLIS = 120_000L
-private const val APP_VERSION_DISPLAY = "V1.1.0"
+private const val APP_VERSION_DISPLAY = "V1.1.1"
 private val NotificationAmountRegex = Regex("""[¥￥]?\s*-?\d+(?:,\d{3})*(?:\.\d{1,2})?\s*(?:元|CNY|RMB)?""")
 private val Green = Color(0xFF1B8F5A)
 private val Red = Color(0xFFD85A50)

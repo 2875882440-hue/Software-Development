@@ -13,40 +13,58 @@ class StatsArchiveCalculatorTest {
     private val now = millis(2026, 6, 24, 12, 0)
 
     @Test
-    fun monthWeeksUseFirstToFifthWeekCards() {
+    fun monthWeeksOnlyKeepWeeksWithRecords() {
         val archives = BillStatisticsCalculator.monthWeekArchives(
             records = listOf(
                 record(1, 1_000L, millis(2026, 6, 2, 9, 0)),
-                record(2, 2_000L, millis(2026, 6, 9, 9, 0)),
-                record(3, 3_000L, millis(2026, 6, 16, 9, 0)),
-                record(4, 4_000L, millis(2026, 6, 23, 9, 0)),
-                record(5, 5_000L, millis(2026, 6, 30, 9, 0))
+                record(2, 4_000L, millis(2026, 6, 23, 9, 0))
             ),
             nowMillis = now,
             zoneId = zone
         )
 
-        assertEquals(listOf("第一周", "第二周", "第三周", "第四周", "第五周"), archives.map { it.label })
+        assertEquals(listOf("第一周", "第四周"), archives.map { it.label })
         assertEquals(1_000L, archives[0].statistics.totalExpenseCents)
-        assertEquals(5_000L, archives[4].statistics.totalExpenseCents)
+        assertEquals(4_000L, archives[1].statistics.totalExpenseCents)
     }
 
     @Test
-    fun yearMonthsCreateTwelveArchiveCards() {
+    fun monthWeeksReturnEmptyWhenCurrentMonthHasNoRecords() {
+        val archives = BillStatisticsCalculator.monthWeekArchives(
+            records = listOf(record(1, 1_000L, millis(2026, 5, 2, 9, 0))),
+            nowMillis = now,
+            zoneId = zone
+        )
+
+        assertEquals(emptyList<String>(), archives.map { it.label })
+    }
+
+    @Test
+    fun yearMonthsOnlyKeepMonthsWithRecords() {
         val archives = BillStatisticsCalculator.yearMonthArchives(
             records = listOf(
-                record(1, 1_000L, millis(2026, 1, 2, 9, 0)),
-                record(2, 6_000L, millis(2026, 6, 24, 9, 0)),
-                record(3, 12_000L, millis(2026, 12, 31, 9, 0))
+                record(1, 3_000L, millis(2026, 3, 2, 9, 0)),
+                record(2, 4_000L, millis(2026, 4, 24, 9, 0)),
+                record(3, 12_000L, millis(2025, 12, 31, 9, 0))
             ),
             nowMillis = now,
             zoneId = zone
         )
 
-        assertEquals(12, archives.size)
-        assertEquals("1月", archives.first().label)
-        assertEquals("12月", archives.last().label)
-        assertEquals(6_000L, archives.first { it.label == "6月" }.statistics.totalExpenseCents)
+        assertEquals(listOf("3月", "4月"), archives.map { it.label })
+        assertEquals(3_000L, archives.first { it.label == "3月" }.statistics.totalExpenseCents)
+        assertEquals(4_000L, archives.first { it.label == "4月" }.statistics.totalExpenseCents)
+    }
+
+    @Test
+    fun yearMonthsReturnEmptyWhenYearHasNoRecords() {
+        val archives = BillStatisticsCalculator.yearMonthArchives(
+            records = listOf(record(1, 1_000L, millis(2025, 12, 31, 9, 0))),
+            nowMillis = now,
+            zoneId = zone
+        )
+
+        assertEquals(emptyList<String>(), archives.map { it.label })
     }
 
     private fun record(id: Long, amountCents: Long, paidAtMillis: Long): ExpenseRecord =

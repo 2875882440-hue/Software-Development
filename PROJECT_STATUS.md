@@ -62,3 +62,11 @@
 - 本版范围：金额识别修复、分类学习、统计 Tab 独立。
 - 数据说明：新增 `merchant_category_learning` 本地学习表，并通过 Room migration 保留旧账单数据。
 - 备份说明：JSON 备份仍导出账单原始字段，并保留账单上的 `learnedMerchantId`；本版暂不导出 `merchant_category_learning` 学习表完整记录。
+
+## V1.1.1 更新说明
+
+- 当前开发版本：V1.1.1
+- `versionName`：`1.1.1`
+- `versionCode`：`111`
+- 本版范围：统计页空数据隐藏修复。
+- 数据说明：未修改数据库结构，未清空或迁移账单数据。

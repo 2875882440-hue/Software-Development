@@ -63,6 +63,40 @@ class BillStatisticsCalculatorTest {
     }
 
     @Test
+    fun summaryListsOnlyContainCategoriesAndSourcesWithRecords() {
+        val stats = BillStatisticsCalculator.calculate(
+            records = listOf(
+                record(1, 1280, TransactionType.EXPENSE, "餐饮", "微信", millis(2026, 6, 12, 8, 0), "com.tencent.mm"),
+                record(2, 3000, TransactionType.EXPENSE, "购物", "支付宝", millis(2026, 6, 12, 9, 0), "com.eg.android.AlipayGphone")
+            ),
+            range = BillStatisticsCalculator.rangeFor(StatsRangeType.MONTH, now, zone),
+            zoneId = zone
+        )
+
+        assertEquals(listOf("购物", "餐饮"), stats.categoryItems.map { it.label })
+        assertEquals(listOf("支付宝", "微信"), stats.sourceItems.map { it.label })
+    }
+
+    @Test
+    fun summaryListsAreEmptyWhenRangeHasNoRecords() {
+        val stats = BillStatisticsCalculator.calculate(
+            records = sampleRecords(),
+            range = BillStatisticsCalculator.rangeFor(
+                type = StatsRangeType.CUSTOM,
+                nowMillis = now,
+                zoneId = zone,
+                customStartMillis = millis(2026, 1, 1, 0, 0),
+                customEndMillis = millis(2026, 1, 31, 0, 0)
+            ),
+            zoneId = zone
+        )
+
+        assertEquals(emptyList<String>(), stats.categoryItems.map { it.label })
+        assertEquals(emptyList<String>(), stats.sourceItems.map { it.label })
+        assertEquals(emptyList<String>(), stats.groups.map { it.label })
+    }
+
+    @Test
     fun updatesTodayStatsAfterRecordAmountChanges() {
         val changed = sampleRecords().map {
             if (it.id == 1L) it.copy(amountCents = 2580L, updatedAtMillis = now) else it

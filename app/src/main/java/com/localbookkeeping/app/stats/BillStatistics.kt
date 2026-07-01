@@ -150,10 +150,12 @@ object BillStatisticsCalculator {
                 toMillis = endExclusive.atStartOfDay(zoneId).toInstant().toEpochMilli(),
                 label = weekLabel(index + 1)
             )
+            val statistics = calculate(records, range, BillGroupType.DAY, zoneId)
+            if (!statistics.hasRealData()) return@mapNotNull null
             ArchivePeriod(
                 label = weekLabel(index + 1),
                 range = range,
-                statistics = calculate(records, range, BillGroupType.DAY, zoneId)
+                statistics = statistics
             )
         }
     }
@@ -164,7 +166,7 @@ object BillStatisticsCalculator {
         zoneId: ZoneId = ZoneId.systemDefault()
     ): List<ArchivePeriod> {
         val year = Instant.ofEpochMilli(nowMillis).atZone(zoneId).year
-        return (1..12).map { month ->
+        return (1..12).mapNotNull { month ->
             val start = LocalDate.of(year, month, 1)
             val endExclusive = start.plusMonths(1)
             val range = TimeRange(
@@ -172,10 +174,12 @@ object BillStatisticsCalculator {
                 toMillis = endExclusive.atStartOfDay(zoneId).toInstant().toEpochMilli(),
                 label = "${month}月"
             )
+            val statistics = calculate(records, range, BillGroupType.DAY, zoneId)
+            if (!statistics.hasRealData()) return@mapNotNull null
             ArchivePeriod(
                 label = "${month}月",
                 range = range,
-                statistics = calculate(records, range, BillGroupType.DAY, zoneId)
+                statistics = statistics
             )
         }
     }
@@ -229,6 +233,7 @@ object BillStatisticsCalculator {
                     percent = if (totalCents > 0) amount.toDouble() / totalCents else 0.0
                 )
             }
+            .filter { it.count > 0 || it.amountCents != 0L }
             .sortedByDescending { it.amountCents }
 
     private fun groupRecords(
@@ -254,6 +259,11 @@ object BillStatisticsCalculator {
                 incomeCents = group.filter { it.type == TransactionType.INCOME }.sumOf { it.amountCents }
             )
         }.sortedByDescending { it.label }
+
+    private fun BillStatistics.hasRealData(): Boolean =
+        expenseCount + incomeCount > 0 ||
+            totalExpenseCents != 0L ||
+            totalIncomeCents != 0L
 
     private fun millisToDate(millis: Long, zoneId: ZoneId): LocalDate =
         Instant.ofEpochMilli(millis).atZone(zoneId).toLocalDate()
