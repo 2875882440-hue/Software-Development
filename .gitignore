@@ -1,0 +1,31 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+app/build/
+
+# Generated APKs and release archives
+release/
+*.apk
+*.aab
+
+# Local verification artifacts
+*.png
+*.bak
+*.tmp
+*.orig
+window_*.xml
+bookkeeping_*.xml
+localbookkeeping-window.xml
+
+# Historical local backup folders; Git history replaces these snapshots.
+V01版本/
+V02版本/
+V03版本/
+V04版本/
+V05版本/
+V06版本/
+V06.2版本/
