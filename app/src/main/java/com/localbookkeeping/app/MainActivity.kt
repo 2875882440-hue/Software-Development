@@ -145,10 +145,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         NotificationChannels.ensureAll(this)
         val app = application as BookkeepingApplication
-        val initialScreen = if (intent?.action == KeepAliveNotificationService.ACTION_OPEN_BACKGROUND_SETTINGS) {
-            AppScreen.BACKGROUND_SETTINGS
-        } else {
-            AppScreen.LEDGER
+        val initialScreen = when (intent?.action) {
+            KeepAliveNotificationService.ACTION_OPEN_BACKGROUND_SETTINGS -> AppScreen.BACKGROUND_SETTINGS
+            KeepAliveNotificationService.ACTION_OPEN_QUICK_BACKFILL -> AppScreen.QUICK_BACKFILL
+            else -> AppScreen.LEDGER
         }
         setContent { BookkeepingApp(app, initialScreen) }
     }
@@ -171,6 +171,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
     var selectedConfirmedRecord by remember { mutableStateOf<ExpenseRecord?>(null) }
     var editingConfirmedRecord by remember { mutableStateOf<ExpenseRecord?>(null) }
     var selectedNotificationLog by remember { mutableStateOf<DebugNotificationLog?>(null) }
+    var notificationDetailReturnScreen by remember { mutableStateOf(AppScreen.REAL_NOTIFICATION_TEST) }
     var notificationAccessEnabled by remember { mutableStateOf(isNotificationListenerEnabled(context)) }
     var autoListeningEnabled by remember { mutableStateOf(KeepAliveNotificationService.isEnabled(context)) }
     var autoListenServiceMissing by remember {
@@ -192,6 +193,11 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
     var lastAlertedExpenseSignature by remember { mutableStateOf("") }
     var suppressInitialLimitAlert by remember { mutableStateOf(true) }
     var quickBackfillReturnScreen by remember { mutableStateOf(AppScreen.LEDGER) }
+    var quickBackfillPreset by remember {
+        mutableStateOf(
+            if (initialScreen == AppScreen.QUICK_BACKFILL) wechatScanBackfillPreset() else defaultQuickBackfillPreset()
+        )
+    }
     var backupBusy by remember { mutableStateOf(false) }
     var backupMessage by remember { mutableStateOf("") }
     var pendingBackupExportText by remember { mutableStateOf("") }
@@ -564,6 +570,18 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
         }
     }
 
+    fun openDefaultQuickBackfill(returnScreen: AppScreen) {
+        quickBackfillPreset = defaultQuickBackfillPreset()
+        quickBackfillReturnScreen = returnScreen
+        screen = AppScreen.QUICK_BACKFILL
+    }
+
+    fun openWechatScanBackfill(returnScreen: AppScreen) {
+        quickBackfillPreset = wechatScanBackfillPreset()
+        quickBackfillReturnScreen = returnScreen
+        screen = AppScreen.QUICK_BACKFILL
+    }
+
     fun navigateBack() {
         when (screen) {
             AppScreen.LEDGER -> {
@@ -573,7 +591,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
             }
             AppScreen.EDIT_PENDING -> screen = AppScreen.PENDING
             AppScreen.EDIT_CONFIRMED -> screen = AppScreen.RECORD_DETAIL
-            AppScreen.NOTIFICATION_RAW_DETAIL -> screen = AppScreen.REAL_NOTIFICATION_TEST
+            AppScreen.NOTIFICATION_RAW_DETAIL -> screen = notificationDetailReturnScreen
             AppScreen.QUICK_BACKFILL -> screen = quickBackfillReturnScreen
             else -> screen = AppScreen.LEDGER
         }
@@ -716,11 +734,10 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                         restoreAutoListen("manualAutoListenRestore")
                     },
                     onOpenRealNotificationTest = { screen = AppScreen.REAL_NOTIFICATION_TEST },
+                    onOpenWechatScanTest = { screen = AppScreen.WECHAT_SCAN_TEST },
                     onOpenTroubleshooting = { screen = AppScreen.TROUBLESHOOTING },
-                    onOpenQuickBackfill = {
-                        quickBackfillReturnScreen = AppScreen.LEDGER
-                        screen = AppScreen.QUICK_BACKFILL
-                    },
+                    onOpenQuickBackfill = { openDefaultQuickBackfill(AppScreen.LEDGER) },
+                    onOpenWechatScanBackfill = { openWechatScanBackfill(AppScreen.LEDGER) },
                     onOpenLearning = { screen = AppScreen.LEARNING },
                     onOpenScreenshotPicker = {
                         screenshotPickerLauncher.launch(
@@ -901,6 +918,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                     onBack = ::navigateBack,
                     onOpenLogDetail = { log ->
                         selectedNotificationLog = log
+                        notificationDetailReturnScreen = AppScreen.REAL_NOTIFICATION_TEST
                         screen = AppScreen.NOTIFICATION_RAW_DETAIL
                     },
                     onSendAppTestNotification = { onResult ->
@@ -912,6 +930,17 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                             sendTestNotificationAndVerify(onResult)
                         }
                     }
+                )
+
+                AppScreen.WECHAT_SCAN_TEST -> WechatScanPaymentTestScreen(
+                    logs = uiState.debugNotificationLogs,
+                    onBack = ::navigateBack,
+                    onOpenLogDetail = { log ->
+                        selectedNotificationLog = log
+                        notificationDetailReturnScreen = AppScreen.WECHAT_SCAN_TEST
+                        screen = AppScreen.NOTIFICATION_RAW_DETAIL
+                    },
+                    onOpenQuickBackfill = { openWechatScanBackfill(AppScreen.WECHAT_SCAN_TEST) }
                 )
 
                 AppScreen.HEALTH -> ListenerHealthScreen(
@@ -1060,11 +1089,16 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                 )
 
                 AppScreen.QUICK_BACKFILL -> QuickBackfillScreen(
+                    preset = quickBackfillPreset,
                     onBack = ::navigateBack,
-                    onSave = { amountCents, type, category, merchantName, sourceApp, paidAtMillis ->
-                        val note = listOf(sourceApp, merchantName.ifBlank { "Unknown" })
-                            .joinToString(" / ")
-                            .take(80)
+                    onSave = { amountCents, type, category, merchantName, sourceApp, paidAtMillis, userNote ->
+                        val note = userNote.ifBlank {
+                            presetNote(
+                                preset = quickBackfillPreset,
+                                sourceApp = sourceApp,
+                                merchantName = merchantName
+                            )
+                        }.take(80)
                         viewModel.addRecord(
                             amountCents = amountCents,
                             type = type,
@@ -1283,8 +1317,10 @@ private fun MainTabsScreen(
     onDisableAutoListen: () -> Unit,
     onRestoreAutoListen: () -> Unit,
     onOpenRealNotificationTest: () -> Unit,
+    onOpenWechatScanTest: () -> Unit,
     onOpenTroubleshooting: () -> Unit,
     onOpenQuickBackfill: () -> Unit,
+    onOpenWechatScanBackfill: () -> Unit,
     onOpenScreenshotPicker: () -> Unit,
     onOpenLearning: () -> Unit,
     onGoToListenerTab: () -> Unit,
@@ -1348,6 +1384,7 @@ private fun MainTabsScreen(
                 onOpenRules = onOpenRules,
                 onOpenBackup = onOpenBackup,
                 onOpenQuickBackfill = onOpenQuickBackfill,
+                onOpenWechatScanBackfill = onOpenWechatScanBackfill,
                 onOpenScreenshotPicker = onOpenScreenshotPicker,
                 onOpenLearning = onOpenLearning,
                 onGoToListenerTab = onGoToListenerTab,
@@ -1385,7 +1422,9 @@ private fun MainTabsScreen(
                 onDisableAutoListen = onDisableAutoListen,
                 onRestoreAutoListen = onRestoreAutoListen,
                 onOpenRealNotificationTest = onOpenRealNotificationTest,
+                onOpenWechatScanTest = onOpenWechatScanTest,
                 onOpenTroubleshooting = onOpenTroubleshooting,
+                onOpenWechatScanBackfill = onOpenWechatScanBackfill,
                 onOneClickRepair = onOneClickRepair,
                 onListenerRescue = onListenerRescue
             )
@@ -1408,6 +1447,7 @@ private fun BookkeepingTabContent(
     onOpenRules: () -> Unit,
     onOpenBackup: () -> Unit,
     onOpenQuickBackfill: () -> Unit,
+    onOpenWechatScanBackfill: () -> Unit,
     onOpenScreenshotPicker: () -> Unit,
     onOpenLearning: () -> Unit,
     onGoToListenerTab: () -> Unit,
@@ -1463,6 +1503,12 @@ private fun BookkeepingTabContent(
                         OutlinedButton(onClick = onOpenRules) { Text("分类规则") }
                         OutlinedButton(onClick = onOpenLearning) { Text("学习记录") }
                         OutlinedButton(onClick = onOpenQuickBackfill) { Text("补录") }
+                    }
+                    Button(
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        onClick = onOpenWechatScanBackfill
+                    ) {
+                        Text("扫码支付后补录")
                     }
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth().height(46.dp),
@@ -1786,7 +1832,9 @@ private fun ListenerTabContent(
     onDisableAutoListen: () -> Unit,
     onRestoreAutoListen: () -> Unit,
     onOpenRealNotificationTest: () -> Unit,
+    onOpenWechatScanTest: () -> Unit,
     onOpenTroubleshooting: () -> Unit,
+    onOpenWechatScanBackfill: () -> Unit,
     onOneClickRepair: () -> Unit,
     onListenerRescue: () -> Unit
 ) {
@@ -1829,6 +1877,12 @@ private fun ListenerTabContent(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = onOpenDebugLogs) { Text("通知日志") }
                         Button(onClick = onOpenRealNotificationTest) { Text("测试通知") }
+                    }
+                    Button(modifier = Modifier.fillMaxWidth(), onClick = onOpenWechatScanTest) {
+                        Text("微信扫码支付测试")
+                    }
+                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenWechatScanBackfill) {
+                        Text("扫码支付后补录")
                     }
                     OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenTroubleshooting) {
                         Text("监听问题排查")
@@ -3447,6 +3501,158 @@ private fun RealNotificationTestScreen(
 }
 
 @Composable
+private fun WechatScanPaymentTestScreen(
+    logs: List<DebugNotificationLog>,
+    onBack: () -> Unit,
+    onOpenLogDetail: (DebugNotificationLog) -> Unit,
+    onOpenQuickBackfill: () -> Unit
+) {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    var testStartTime by remember { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
+
+    val windowLogs = logs.inWindow(testStartTime, WECHAT_PACKAGE, PAYMENT_TEST_WINDOW_MILLIS)
+    val active = testStartTime?.let { now - it <= PAYMENT_TEST_WINDOW_MILLIS } == true
+    val conclusion = wechatScanTestConclusion(testStartTime, active, windowLogs)
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Spacer(Modifier.height(18.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButtonLike("返回", onBack)
+                Spacer(Modifier.width(12.dp))
+                Text("微信扫码支付测试", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            }
+            Text("开始后请在 2 分钟内完成一笔微信扫码支付，页面会记录所有微信通知和金额解析诊断。", color = MutedText)
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("测试模式", color = PrimaryText, fontWeight = FontWeight.Bold)
+                    Button(
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        onClick = { testStartTime = System.currentTimeMillis() }
+                    ) {
+                        Text("开始 2 分钟测试")
+                    }
+                    NotificationWindowSummary(testStartTime, now, PAYMENT_TEST_WINDOW_MILLIS)
+                    Text(
+                        conclusion,
+                        color = wechatScanConclusionColor(conclusion),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenQuickBackfill) {
+                        Text("扫码支付后补录")
+                    }
+                }
+            }
+        }
+
+        if (windowLogs.isEmpty() && testStartTime != null && !active) {
+            item {
+                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = SoftRed)) {
+                    Text(
+                        "微信扫码支付没有产生可监听通知，APP 无法自动读取，需要使用快捷补录。",
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        color = Red,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
+        if (windowLogs.isNotEmpty()) {
+            item {
+                Text("捕获到的微信通知", color = PrimaryText, fontWeight = FontWeight.Bold)
+            }
+            items(windowLogs, key = { it.id }) { log ->
+                WechatScanDiagnosticCard(log = log, onOpenLogDetail = onOpenLogDetail)
+            }
+        }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("结论规则", color = PrimaryText, fontWeight = FontWeight.SemiBold)
+                    Text("A. 没有捕获到 com.tencent.mm 通知：微信没有产生可监听通知，只能使用快捷补录。", color = MutedText, fontSize = 13.sp)
+                    Text("B. 捕获到微信通知但不是支付相关：查看 rawText 和 failReason，用于后续扩展规则。", color = MutedText, fontSize = 13.sp)
+                    Text("C. 捕获到支付通知但金额解析失败：查看 amountCandidates 和 selectedReason。", color = MutedText, fontSize = 13.sp)
+                    Text("D. 捕获并解析成功：会自动生成待确认账单。", color = MutedText, fontSize = 13.sp)
+                }
+            }
+        }
+
+        item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun WechatScanDiagnosticCard(log: DebugNotificationLog, onOpenLogDetail: (DebugNotificationLog) -> Unit) {
+    val parseResult = remember(log.id, log.packageName, log.title, log.rawText, log.postTime) {
+        NotificationBillParser().parse(log.packageName, log.title, log.rawText, log.postTime)
+    }
+    val diagnostics = parseResult.diagnostics
+    val amountCandidates = log.amountCandidates.ifBlank {
+        diagnostics.amountCandidates.joinToString("\n") { "${it.text} -> ${formatMoney(it.amountCents)} / score=${it.score} / ${it.reason}" }
+    }
+    val selectedAmount = log.selectedAmount.ifBlank {
+        diagnostics.selectedAmount?.let { formatMoney(it.amountCents) }.orEmpty()
+    }
+    val selectedReason = log.selectedReason.ifBlank { diagnostics.selectedAmount?.reason.orEmpty() }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onOpenLogDetail(log) },
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = PageBackground)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("微信", color = PrimaryText, fontWeight = FontWeight.SemiBold)
+                Text(formatDateTime(log.receivedAtMillis), color = MutedText, fontSize = 12.sp)
+            }
+            DebugField("packageName", log.packageName)
+            DebugField("title", log.title)
+            DebugField("text", log.text)
+            DebugField("subText", log.subText)
+            DebugField("bigText", log.bigText)
+            DebugField("textLines", log.textLines)
+            DebugField("rawText", log.rawText)
+            DebugField("postTime", formatOptionalDateTime(log.postTime))
+            DebugField("notificationKey", log.notificationKey)
+            DebugField("amountCandidates", amountCandidates)
+            DebugField("selectedAmount", selectedAmount)
+            DebugField("selectedReason", selectedReason)
+            DebugField("isPaymentRelated", yesNo(log.isPaymentRelated || parseResult.isPaymentNotification))
+            DebugField("failReason", log.failReason.ifBlank { log.failureReason.ifBlank { parseResult.failureReason } })
+            if (log.pendingCreated) {
+                Text("已生成待确认账单", color = Green, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
 private fun DiagnosticStepCard(
     title: String,
     body: String,
@@ -3553,9 +3759,19 @@ private fun NotificationRawTextDetailScreen(
                     DetailField("bigText", log.bigText)
                     DetailField("textLines", log.textLines)
                     DetailField("rawText", log.rawText)
+                    DetailField("notificationKey", log.notificationKey)
                     DetailField("matchedKeywords", diagnostics.matchedKeywords.joinToString(" / "))
+                    DetailField(
+                        "amountCandidates",
+                        log.amountCandidates.ifBlank {
+                            diagnostics.amountCandidates.joinToString("\n") {
+                                "${it.text} -> ${formatMoney(it.amountCents)} / score=${it.score} / ${it.reason}"
+                            }
+                        }
+                    )
                     // repaired damaged text line
-                    DetailField("最终选择金额", diagnostics.selectedAmount?.let { formatMoney(it.amountCents) }.orEmpty())
+                    DetailField("最终选择金额", log.selectedAmount.ifBlank { diagnostics.selectedAmount?.let { formatMoney(it.amountCents) }.orEmpty() })
+                    DetailField("selectedReason", log.selectedReason.ifBlank { diagnostics.selectedAmount?.reason.orEmpty() })
                     // repaired damaged text line
                     DetailField(
                         "商户识别",
@@ -3620,22 +3836,25 @@ private fun TroubleshootingStep(
 
 @Composable
 private fun QuickBackfillScreen(
+    preset: QuickBackfillPreset,
     onBack: () -> Unit,
-    onSave: (Long, TransactionType, String, String, String, Long) -> Unit
+    onSave: (Long, TransactionType, String, String, String, Long, String) -> Unit
 ) {
     var amount by remember { mutableStateOf("") }
-    var type by remember { mutableStateOf(TransactionType.EXPENSE) }
+    var type by remember(preset.title) { mutableStateOf(preset.type) }
     var category by remember { mutableStateOf(ExpenseCategories.expense.first()) }
     var merchantName by remember { mutableStateOf("") }
-    var sourceApp by remember { mutableStateOf("Manual") }
-    var dateText by remember { mutableStateOf(formatDate(System.currentTimeMillis())) }
+    var sourceApp by remember(preset.title) { mutableStateOf(preset.sourceApp) }
+    var note by remember(preset.title) { mutableStateOf(preset.note) }
+    val initialPaidAtMillis = remember(preset.title) { System.currentTimeMillis() }
+    var dateText by remember(preset.title) { mutableStateOf(formatDate(initialPaidAtMillis)) }
     var error by remember { mutableStateOf("") }
     val categories = when (type) {
         TransactionType.INCOME -> ExpenseCategories.income
         TransactionType.EXPENSE -> ExpenseCategories.expense
         TransactionType.UNKNOWN -> ExpenseCategories.expense
     }.let { (listOf(category) + it).distinct() }
-    val sources = listOf("WeChat", "Alipay", "Manual", "Notification")
+    val sources = listOf("微信", "支付宝", "手动", "通知")
 
     LaunchedEffect(type) {
         if (category !in categories) {
@@ -3656,7 +3875,7 @@ private fun QuickBackfillScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButtonLike("返回", onBack)
                 Spacer(Modifier.width(12.dp))
-                Text("刚刚付款补录",  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Text(preset.title,  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -3701,6 +3920,13 @@ private fun QuickBackfillScreen(
                         label = { Text("日期 yyyy-MM-dd") },
                         singleLine = true
                     )
+                    OutlinedTextField(
+                        value = note,
+                        onValueChange = { note = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("备注") },
+                        singleLine = true
+                    )
                     if (error.isNotBlank()) {
                         Text(error, color = Red, fontSize = 13.sp)
                     }
@@ -3708,11 +3934,12 @@ private fun QuickBackfillScreen(
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         onClick = {
                             val amountCents = parseAmountCents(amount)
-                            val paidAtMillis = parseDateMillis(dateText)
+                            val parsedDateMillis = parseDateMillis(dateText)
+                            val paidAtMillis = if (dateText == formatDate(initialPaidAtMillis)) initialPaidAtMillis else parsedDateMillis
                             when {
                                 amountCents == null || amountCents <= 0 -> error = "请输入大于 0 的金额"
                                 paidAtMillis == null -> error = "时间格式应为 yyyy-MM-dd"
-                                else -> onSave(amountCents, type, category, merchantName.trim(), sourceApp, paidAtMillis)
+                                else -> onSave(amountCents, type, category, merchantName.trim(), sourceApp, paidAtMillis, note.trim())
                             }
                         }
                     ) {
@@ -4686,6 +4913,45 @@ private fun paymentConclusionColor(
     else -> MutedText
 }
 
+private fun wechatScanTestConclusion(
+    startTime: Long?,
+    active: Boolean,
+    logs: List<DebugNotificationLog>
+): String {
+    if (startTime == null) return "未开始"
+    if (logs.isEmpty() && active) return "等待微信扫码支付通知中"
+    if (logs.isEmpty()) return "微信扫码支付没有产生可监听通知，APP 无法自动读取，需要使用快捷补录。"
+
+    val parsed = logs.firstOrNull { it.pendingCreated }
+    if (parsed != null) return "D. 捕获到微信支付通知并解析成功，已生成待确认账单。"
+
+    val paymentRelated = logs.firstOrNull { log ->
+        log.isPaymentRelated || log.isPaymentNotification ||
+            NotificationBillParser().parse(log.packageName, log.title, log.rawText, log.postTime).isPaymentNotification
+    }
+    if (paymentRelated == null) {
+        val latest = logs.first()
+        val failReason = latest.failReason.ifBlank { latest.failureReason.ifBlank { "未识别为支付相关通知" } }
+        return "B. 捕获到微信通知，但不是支付相关。failReason：$failReason"
+    }
+
+    if (!paymentRelated.hasAmount) {
+        val failReason = paymentRelated.failReason.ifBlank { paymentRelated.failureReason.ifBlank { "金额解析失败" } }
+        val candidates = paymentRelated.amountCandidates.ifBlank { "无可靠金额候选" }
+        return "C. 捕获到微信支付通知，但金额解析失败。amountCandidates：$candidates；failReason：$failReason"
+    }
+
+    return "已捕获微信支付通知并识别金额，但未生成待确认账单，可能被重复记录过滤；请查看 failReason。"
+}
+
+private fun wechatScanConclusionColor(conclusion: String): Color = when {
+    conclusion.startsWith("D.") -> Green
+    conclusion.startsWith("C.") || conclusion.startsWith("B.") -> Orange
+    conclusion.contains("没有产生可监听通知") -> Red
+    conclusion.contains("等待") || conclusion == "未开始" -> MutedText
+    else -> Orange
+}
+
 private fun isPaymentPackage(packageName: String): Boolean =
     packageName == WECHAT_PACKAGE || packageName == ALIPAY_PACKAGE
 
@@ -4751,6 +5017,7 @@ private enum class AppScreen {
     STATS,
     BACKUP,
     REAL_NOTIFICATION_TEST,
+    WECHAT_SCAN_TEST,
     NOTIFICATION_RAW_DETAIL,
     HEALTH,
     BACKGROUND_SETTINGS,
@@ -4814,6 +5081,33 @@ private data class ScreenshotPreviewState(
     val message: String
 )
 
+private data class QuickBackfillPreset(
+    val title: String,
+    val sourceApp: String,
+    val note: String,
+    val type: TransactionType = TransactionType.EXPENSE
+)
+
+private fun defaultQuickBackfillPreset(): QuickBackfillPreset =
+    QuickBackfillPreset(
+        title = "刚刚付款补录",
+        sourceApp = "手动",
+        note = ""
+    )
+
+private fun wechatScanBackfillPreset(): QuickBackfillPreset =
+    QuickBackfillPreset(
+        title = "扫码支付后补录",
+        sourceApp = "微信",
+        note = "微信扫码支付补录"
+    )
+
+private fun presetNote(preset: QuickBackfillPreset, sourceApp: String, merchantName: String): String =
+    preset.note.ifBlank {
+        listOf(sourceApp, merchantName.ifBlank { "Unknown" })
+            .joinToString(" / ")
+    }
+
 private enum class DebugLogFilter(val packageName: String?) {
     ALL(null),
     WECHAT("com.tencent.mm"),
@@ -4827,7 +5121,7 @@ private const val WECHAT_PACKAGE = "com.tencent.mm"
 private const val ALIPAY_PACKAGE = "com.eg.android.AlipayGphone"
 private const val NORMAL_TEST_WINDOW_MILLIS = 30_000L
 private const val PAYMENT_TEST_WINDOW_MILLIS = 120_000L
-private const val APP_VERSION_DISPLAY = "V1.1.1"
+private const val APP_VERSION_DISPLAY = "V1.1.2"
 private val NotificationAmountRegex = Regex("""[¥￥]?\s*-?\d+(?:,\d{3})*(?:\.\d{1,2})?\s*(?:元|CNY|RMB)?""")
 private val Green = Color(0xFF1B8F5A)
 private val Red = Color(0xFFD85A50)

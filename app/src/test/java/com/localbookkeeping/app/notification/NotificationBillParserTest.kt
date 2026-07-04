@@ -371,4 +371,30 @@ class NotificationBillParserTest {
         assertNotNull(result.bill)
         assertEquals(3700L, result.bill!!.amountCents)
     }
+
+    @Test
+    fun parsesWechatScanPaymentNotifications() {
+        val cases = listOf(
+            "微信支付\n扫码支付\n向商家 瑞幸咖啡 付款\n实付37元" to "瑞幸咖啡",
+            "微信支付 商户消费 星巴克 交易金额37.00元 订单号123456789" to "星巴克",
+            "微信支付\n收款方：便利店\n金额：37.00\n12:30" to "便利店",
+            "二维码付款 已支付 ￥37.00 手机尾号1234" to ""
+        )
+
+        cases.forEach { (rawText, merchant) ->
+            val result = parser.parse(
+                packageName = "com.tencent.mm",
+                title = "微信支付",
+                text = rawText
+            )
+
+            assertNotNull(rawText, result.bill)
+            assertEquals(rawText, 3700L, result.bill!!.amountCents)
+            assertEquals(rawText, TransactionType.EXPENSE, result.bill!!.type)
+            assertEquals(rawText, 3700L, result.diagnostics.selectedAmount?.amountCents)
+            if (merchant.isNotBlank()) {
+                assertEquals(rawText, merchant, result.bill!!.merchantName)
+            }
+        }
+    }
 }

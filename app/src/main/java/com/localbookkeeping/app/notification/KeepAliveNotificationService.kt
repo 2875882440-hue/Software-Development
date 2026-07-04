@@ -134,6 +134,7 @@ class KeepAliveNotificationService : Service() {
             .setContentTitle(title)
             .setContentText(text)
             .setContentIntent(openBackgroundSettingsIntent())
+            .addAction(android.R.drawable.ic_menu_edit, "补录一笔", openQuickBackfillIntent())
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -148,10 +149,20 @@ class KeepAliveNotificationService : Service() {
         return PendingIntent.getActivity(this, 0, intent, flags)
     }
 
+    private fun openQuickBackfillIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java)
+            .setAction(ACTION_OPEN_QUICK_BACKFILL)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+        return PendingIntent.getActivity(this, 1, intent, flags)
+    }
+
     companion object {
         private const val NOTIFICATION_ID = 21001
         private const val ACTION_STOP = "com.localbookkeeping.app.STOP_KEEP_ALIVE"
         const val ACTION_OPEN_BACKGROUND_SETTINGS = "com.localbookkeeping.app.OPEN_BACKGROUND_SETTINGS"
+        const val ACTION_OPEN_QUICK_BACKFILL = "com.localbookkeeping.app.OPEN_QUICK_BACKFILL"
         private const val PREFS = "auto_listener"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_RUNNING = "running"

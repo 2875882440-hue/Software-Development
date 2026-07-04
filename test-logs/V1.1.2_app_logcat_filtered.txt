@@ -1,0 +1,59 @@
+﻿07-04 15:11:54.477 D/bookkeeping.app(15254): blurUtils, initBackgroundBlurMinInterval processName(com.localbookkeeping.app), inWhiteLists(0)
+07-04 15:11:54.497 I/bookkeeping.app(15254): AssetManager2(0xb400007d4e6a3798) locale list changing from [] to [zh-CN]
+07-04 15:11:54.535 D/vulkan  (15254): searching for layers in '/data/app/~~vSGuZ71jbk1gcR-8w3EvFQ==/com.localbookkeeping.app-KbcWGTw7GhfTUbrNr0nBwA==/lib/arm64'
+07-04 15:11:54.535 D/vulkan  (15254): searching for layers in '/data/app/~~vSGuZ71jbk1gcR-8w3EvFQ==/com.localbookkeeping.app-KbcWGTw7GhfTUbrNr0nBwA==/base.apk!/lib/arm64-v8a'
+07-04 15:11:54.558 D/Activity(15254): Activity = ActivityInfo{8542ca9 com.localbookkeeping.app.MainActivity}, Resume onConfigurationChanged = {1.0 460mcc2mnc [zh_CN] ldltr sw385dp w385dp h837dp 480dpi nrml long hdr widecg port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1156, 2510) mAppBounds=Rect(0, 0 - 1156, 2510) mMaxBounds=Rect(0, 0 - 1156, 2510) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mActivityType=standard mAlwaysOnTop=undefined mRotation=ROTATION_0 mInSplitScreen=false letterBoxed=false foScaled=false isSpecificEmbedded=false embeddingScale=1.0} s.2 fontWeightAdjustment=0/d/o themeChanged=0 themeChangedFlags=0 display=0 extraData = Bundle[{}] screenType=0/o}
+07-04 15:11:54.567 D/bookkeeping.app(15254): MiuiProcessManagerServiceStub setSchedFifo
+07-04 15:11:54.571 I/bookkeeping.app(15254): AssetManager2(0xb400007d4e6a1538) locale list changing from [] to [zh-CN]
+07-04 15:11:54.577 I/AdrenoVK-0(15254): Process Name        : com.localbookkeeping.app
+07-04 15:11:54.581 I/ContentCatcher(15254): SettingTrigger : register screen QA status observer com.localbookkeeping.app.MainActivity
+07-04 15:11:54.581 I/ContentCatcher(15254): SettingTrigger : register global collect status observer com.localbookkeeping.app.MainActivity
+07-04 15:11:54.582 I/ContentCatcher(15254): SettingTrigger : registerUIAgentListener com.localbookkeeping.app.MainActivity, uid:10361
+07-04 15:11:54.604 D/DecorViewImmersiveImpl(15254): onAttachedToWindow. pkg: com.localbookkeeping.app
+07-04 15:11:54.604 D/DecorViewImmersiveImpl(15254): com.localbookkeeping.app.MainActivity@f91c33a already set forced E2E by app
+07-04 15:11:54.660 E/TurboSchedMonitor(15254): failed to find setSchedAffinity method com.localbookkeeping.app
+07-04 15:11:54.662 E/TurboSchedMonitor(15254): failed to find setSchedAffinity method com.localbookkeeping.app
+07-04 15:11:54.662 E/TurboSchedMonitor(15254): failed to find setSchedAffinity method com.localbookkeeping.app
+07-04 15:11:54.663 E/TurboSchedMonitor(15254): failed to find setSchedAffinity method com.localbookkeeping.app
+07-04 15:11:54.665 W/bookkeeping.app(15254): Method boolean androidx.compose.runtime.snapshots.SnapshotStateList.conditionalUpdate(boolean, kotlin.jvm.functions.Function1) failed lock verification and will run slower.
+07-04 15:11:54.665 W/bookkeeping.app(15254): Common causes for lock verification issues are non-optimized dex code
+07-04 15:11:54.665 W/bookkeeping.app(15254): and incorrect proguard optimizations.
+07-04 15:11:54.665 W/bookkeeping.app(15254): Method boolean androidx.compose.runtime.snapshots.SnapshotStateList.conditionalUpdate$default(androidx.compose.runtime.snapshots.SnapshotStateList, boolean, kotlin.jvm.functions.Function1, int, java.lang.Object) failed lock verification and will run slower.
+07-04 15:11:54.665 W/bookkeeping.app(15254): Method java.lang.Object androidx.compose.runtime.snapshots.SnapshotStateList.mutate(kotlin.jvm.functions.Function1) failed lock verification and will run slower.
+07-04 15:11:54.665 W/bookkeeping.app(15254): Method void androidx.compose.runtime.snapshots.SnapshotStateList.update(boolean, kotlin.jvm.functions.Function1) failed lock verification and will run slower.
+07-04 15:11:54.665 W/bookkeeping.app(15254): Method void androidx.compose.runtime.snapshots.SnapshotStateList.update$default(androidx.compose.runtime.snapshots.SnapshotStateList, boolean, kotlin.jvm.functions.Function1, int, java.lang.Object) failed lock verification and will run slower.
+07-04 15:11:54.839 D/bookkeeping.app(15254): MWDF parse error: No such file or directory
+07-04 15:11:54.864 I/ImeTracker(15254): com.localbookkeeping.app:5ba10cf7: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+07-04 15:11:54.881 I/bookkeeping.app(15254): Compiler allocated 6765KB to compile void android.view.ViewRootImpl.performTraversals()
+07-04 15:11:54.895 D/DecorViewImmersiveImpl(15254): onAttachedToWindow. pkg: com.localbookkeeping.app
+07-04 15:11:54.895 D/DecorViewImmersiveImpl(15254): com.localbookkeeping.app.MainActivity@f91c33a already set forced E2E by app
+07-04 15:11:54.940 D/bookkeeping.app(15254): MWDF parse error: Try again
+07-04 15:11:54.955 I/ImeTracker(15254): com.localbookkeeping.app:ec8beac5: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+07-04 15:12:04.506 I/bookkeeping.app(15254): ProcessProfilingInfo new_methods=48 is saved saved_to_disk=1
+07-04 15:12:11.378 I/bookkeeping.app(15254): This is non sticky GC, maxfree is 33554432 minfree is 8388608
+07-04 15:12:24.609 E/bookkeeping.app(15254): FrameInsert open fail: No such file or directory
+07-04 15:12:53.724 I/PaymentNotificationListener(15254): onNotificationRemoved packageName=com.tencent.mm, title=A, text=干满一年就攒够钱了啊, componentName=ComponentInfo{com.localbookkeeping.app/com.localbookkeeping.app.notification.PaymentNotificationListenerService}
+07-04 15:12:57.953 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_DOWN, id[0]=0, pointerCount=1, eventTime=457057075, downTime=457057075, phoneEventTime=1783149177944 } moveCount:0
+07-04 15:12:57.970 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_UP, id[0]=0, pointerCount=1, eventTime=457057075, downTime=457057075, phoneEventTime=1783149177944 } moveCount:0
+07-04 15:12:57.986 W/bookkeeping.app(15254): Binder 0xb400007cde6c4b60 destroyed after setInheritRt before being parceled.
+07-04 15:12:58.005 I/ImeTracker(15254): com.localbookkeeping.app:58e2c5c4: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+07-04 15:13:13.489 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_DOWN, id[0]=0, pointerCount=1, eventTime=457072619, downTime=457072619, phoneEventTime=1783149193488 } moveCount:0
+07-04 15:13:13.496 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_UP, id[0]=0, pointerCount=1, eventTime=457072619, downTime=457072619, phoneEventTime=1783149193488 } moveCount:0
+07-04 15:13:13.558 E/TurboSchedMonitor(15254): failed to find setSchedAffinity method com.localbookkeeping.app
+07-04 15:13:13.559 E/TurboSchedMonitor(15254): failed to find setSchedAffinity method com.localbookkeeping.app
+07-04 15:13:14.099 W/RenderThread(15254): type=1400 audit(0.0:626145): avc:  denied  { getattr } for  path="/sys/module/metis/parameters/minor_window_app" dev="sysfs" ino=84048 scontext=u:r:untrusted_app:s0:c105,c257,c512,c768 tcontext=u:object_r:sysfs_migt:s0 tclass=file permissive=0 app=com.localbookkeeping.app
+07-04 15:13:28.996 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_DOWN, id[0]=0, pointerCount=1, eventTime=457088126, downTime=457088126, phoneEventTime=1783149208995 } moveCount:0
+07-04 15:13:29.697 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_UP, id[0]=0, pointerCount=1, eventTime=457088827, downTime=457088126, phoneEventTime=1783149209695 } moveCount:39
+07-04 15:13:35.801 I/PaymentNotificationListener(15254): onNotificationRemoved packageName=android, title=热点已启用, text=1个设备已连接, 可能增加耗电和发热, componentName=ComponentInfo{com.localbookkeeping.app/com.localbookkeeping.app.notification.PaymentNotificationListenerService}
+07-04 15:13:36.019 I/PaymentNotificationListener(15254): onNotificationPosted packageName=android, title=热点已启用, text=没有设备连接, componentName=ComponentInfo{com.localbookkeeping.app/com.localbookkeeping.app.notification.PaymentNotificationListenerService}
+07-04 15:13:36.030 I/PaymentNotificationListener(15254): ignored package=android, reason=非微信/支付宝通知, rawText=热点已启用
+07-04 15:13:36.030 I/PaymentNotificationListener(15254): 没有设备连接
+07-04 15:13:42.900 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_DOWN, id[0]=0, pointerCount=1, eventTime=457102030, downTime=457102030, phoneEventTime=1783149222899 } moveCount:0
+07-04 15:13:43.501 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_UP, id[0]=0, pointerCount=1, eventTime=457102631, downTime=457102030, phoneEventTime=1783149223500 } moveCount:35
+07-04 15:13:52.541 I/PaymentNotificationListener(15254): onNotificationRemoved packageName=com.milink.service, title=UniversalClipboardService, text=, componentName=ComponentInfo{com.localbookkeeping.app/com.localbookkeeping.app.notification.PaymentNotificationListenerService}
+07-04 15:13:59.832 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_DOWN, id[0]=0, pointerCount=1, eventTime=457118962, downTime=457118962, phoneEventTime=1783149239830 } moveCount:0
+07-04 15:13:59.836 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_UP, id[0]=0, pointerCount=1, eventTime=457118962, downTime=457118962, phoneEventTime=1783149239831 } moveCount:0
+07-04 15:14:15.325 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_DOWN, id[0]=0, pointerCount=1, eventTime=457134455, downTime=457134455, phoneEventTime=1783149255324 } moveCount:0
+07-04 15:14:15.330 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_UP, id[0]=0, pointerCount=1, eventTime=457134455, downTime=457134455, phoneEventTime=1783149255324 } moveCount:0
+07-04 15:14:29.772 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_DOWN, id[0]=0, pointerCount=1, eventTime=457148902, downTime=457148902, phoneEventTime=1783149269771 } moveCount:0
+07-04 15:14:29.777 I/MIUIInput(15254): [MotionEvent] ViewRootImpl windowName 'com.localbookkeeping.app/com.localbookkeeping.app.MainActivity', { action=ACTION_UP, id[0]=0, pointerCount=1, eventTime=457148902, downTime=457148902, phoneEventTime=1783149269771 } moveCount:0

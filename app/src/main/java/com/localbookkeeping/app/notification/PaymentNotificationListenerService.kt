@@ -118,6 +118,7 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     bigText = content.bigText,
                     textLines = content.textLines,
                     rawText = content.rawText,
+                    notificationKey = sbn.key,
                     postTime = sbn.postTime,
                     receivedAtMillis = System.currentTimeMillis(),
                     parseStatus = "RECEIVED",
@@ -155,7 +156,10 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     parseReason = parseResult.parseReason,
                     isPaymentRelated = isRawPaymentRelated || parseResult.isPaymentNotification,
                     isParsed = false,
-                    failReason = parseResult.failureReason
+                    failReason = parseResult.failureReason,
+                    amountCandidates = parseResult.diagnostics.amountCandidatesText(),
+                    selectedAmount = parseResult.diagnostics.selectedAmountText(),
+                    selectedReason = parseResult.diagnostics.selectedReasonText()
                 )
                 Log.i(TAG, "ignored package=${sbn.packageName}, reason=${parseResult.failureReason}, rawText=${content.rawText}")
                 return@launch
@@ -203,7 +207,10 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     finalCategory = insertResult.finalCategory,
                     isPaymentRelated = true,
                     isParsed = true,
-                    failReason = ""
+                    failReason = "",
+                    amountCandidates = parseResult.diagnostics.amountCandidatesText(),
+                    selectedAmount = parseResult.diagnostics.selectedAmountText(),
+                    selectedReason = parseResult.diagnostics.selectedReasonText()
                 )
             } else {
                 val duplicateReason = insertResult.duplicateReason.ifBlank { "被判定为重复通知" }
@@ -226,7 +233,10 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     finalCategory = insertResult.finalCategory,
                     isPaymentRelated = true,
                     isParsed = false,
-                    failReason = duplicateReason
+                    failReason = duplicateReason,
+                    amountCandidates = parseResult.diagnostics.amountCandidatesText(),
+                    selectedAmount = parseResult.diagnostics.selectedAmountText(),
+                    selectedReason = parseResult.diagnostics.selectedReasonText()
                 )
             }
             Log.i(TAG, "parsed package=${sbn.packageName}, inserted=${insertResult.inserted}, amount=${parsed.amountCents}, type=${insertResult.finalType}, status=${parsed.status}")
@@ -316,11 +326,21 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             "交易成功",
             "已付款",
             "已支付",
+            "扫码支付",
+            "二维码付款",
+            "向商家付款",
+            "向商户付款",
             "扣款",
             "消费",
+            "商户消费",
             "收款",
+            "收款方",
+            "商家",
             "到账",
             "转账",
+            "实付",
+            "消费金额",
+            "交易金额",
             "微信支付",
             "支付宝"
         )
@@ -331,6 +351,17 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             isPaymentApp(packageName) && paymentKeywords.any { rawText.contains(it) }
     }
 }
+
+private fun NotificationParseDiagnostics.amountCandidatesText(): String =
+    amountCandidates.joinToString("\n") { candidate ->
+        "${candidate.text} -> ${candidate.amountCents}分 / score=${candidate.score} / ${candidate.reason}"
+    }
+
+private fun NotificationParseDiagnostics.selectedAmountText(): String =
+    selectedAmount?.let { "${it.text} -> ${it.amountCents}分" }.orEmpty()
+
+private fun NotificationParseDiagnostics.selectedReasonText(): String =
+    selectedAmount?.reason.orEmpty()
 
 private data class NotificationContent(
     val title: String,

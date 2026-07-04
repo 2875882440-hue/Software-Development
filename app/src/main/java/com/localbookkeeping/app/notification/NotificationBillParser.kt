@@ -325,7 +325,8 @@ class NotificationBillParser {
 
     private fun detectType(text: String, selectedAmount: AmountCandidate?): TypeDetection {
         val content = text.replace("微信支付", "").replace("支付宝", "")
-        val incomeMatches = incomeKeywords.filter { content.contains(it) }
+        val incomeContent = content.replace("收款方", "")
+        val incomeMatches = incomeKeywords.filter { incomeContent.contains(it) }
         val expenseMatches = expenseKeywords.filter { content.contains(it) }
         if (incomeMatches.isEmpty() && expenseMatches.isEmpty()) {
             return TypeDetection(TransactionType.UNKNOWN, "未命中收入/支出关键词")
@@ -370,6 +371,8 @@ class NotificationBillParser {
 
     private fun String.cleanMerchant(): String =
         replace("\n", " ")
+            .replace(amountFingerprintRegex, "")
+            .replace(Regex("""\s*(付款成功|支付成功|交易成功|已付款|已支付|扫码支付|二维码付款|实付|消费金额|交易金额)\s*"""), " ")
             .trim(' ', '：', ':', '，', ',', '。', '；', ';')
             .replace(Regex("""\s+"""), " ")
 
@@ -424,46 +427,63 @@ class NotificationBillParser {
             "交易成功",
             "已付款",
             "已支付",
+            "扫码支付",
+            "二维码付款",
+            "向商家付款",
+            "向商户付款",
             "扣款",
             "消费",
+            "商户消费",
             "收款",
+            "收款方",
+            "商家",
             "到账",
             "转账",
+            "实付",
+            "消费金额",
+            "交易金额",
             "微信支付",
             "支付宝"
         )
         private val incomeKeywords = listOf("收款", "到账", "入账", "收到转账", "已收款")
-        private val expenseKeywords = listOf("付款", "支付", "扣款", "消费", "已付款", "支付成功", "实付", "支出")
+        private val expenseKeywords = listOf("付款", "支付", "扣款", "消费", "已付款", "已支付", "支付成功", "付款成功", "实付", "支出", "扫码支付", "二维码付款", "商户消费", "收款方")
         private val sourceNoise = listOf("微信支付", "微信", "支付宝", "服务通知", "支付助手", "交易提醒")
         private val amountKeywordWeights = linkedMapOf(
             "付款" to 45,
             "支付" to 45,
             "实付" to 55,
+            "消费金额" to 70,
             "交易金额" to 65,
             "金额" to 50,
             "扣款" to 45,
             "消费" to 45,
             "支出" to 45,
+            "扫码支付" to 45,
+            "商户" to 30,
+            "商家" to 30,
             "收款" to 35,
             "到账" to 35
         )
         private val amountPhraseRegex = Regex(
-            """(?:(?:支付|付款|实付|消费|支出|扣款|交易金额|金额)\s*[:：]?\s*)?(?<amount>[¥￥]?\s*-?[0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?\s*元?)"""
+            """(?:(?:支付|付款|实付|消费金额|消费|支出|扣款|交易金额|金额|扫码支付)\s*[:：]?\s*)?(?<amount>[¥￥]?\s*-?[0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?\s*元?)"""
         )
         private val splitDigitAmountRegex = Regex(
-            """(?<keyword>支付|付款|实付|消费|支出|扣款|交易金额|金额)\s*(?:成功|完成)?\s*[:：]?\s*(?<digits>[0-9](?:\s+[0-9]){1,3})\s*元?"""
+            """(?<keyword>支付|付款|实付|消费金额|消费|支出|扣款|交易金额|金额|扫码支付)\s*(?:成功|完成)?\s*[:：]?\s*(?<digits>[0-9](?:\s+[0-9]){1,3})\s*元?"""
         )
         private val numberRegex = Regex("""-?[0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?""")
         private val amountFingerprintRegex = Regex("""[¥￥]?\s*-?[0-9]+(?:,[0-9]{3})*(?:\.[0-9]{1,2})?\s*元?""")
         private val dateTimeSeparators = setOf('-', '/', ':', '年', '月', '日')
         private val dateTimeContextRegex = Regex("""\d{1,4}[-/:年月日]\d{1,2}|\d{1,2}[-/:年月日]\d{1,4}""")
         private val merchantPatterns = listOf(
+            Regex("""向\s*(?:商家|商户)\s*([^\n，,。；;]{2,40}?)\s*付款""") to "命中模式：向商家/商户 XXX 付款",
             Regex("""向\s*([^\n，,。；;]{2,40}?)\s*付款""") to "命中模式：向 XXX 付款",
             Regex("""付款给\s*([^\n，,。；;]{2,40})""") to "命中模式：付款给 XXX",
             Regex("""商户\s*[:：]\s*([^\n，,。；;]{2,40})""") to "命中模式：商户：XXX",
+            Regex("""商家\s*[:：]\s*([^\n，,。；;]{2,40})""") to "命中模式：商家：XXX",
             Regex("""收款方\s*[:：]\s*([^\n，,。；;]{2,40})""") to "命中模式：收款方：XXX",
             Regex("""对方账户\s*[:：]\s*([^\n，,。；;]{2,40})""") to "命中模式：对方账户：XXX",
             Regex("""([^\n，,。；;]{2,40}?)\s*收款成功""") to "命中模式：XXX 收款成功",
+            Regex("""微信支付\s*商户消费\s*([^\n，,。；;0-9¥￥元]{2,40})""") to "命中模式：微信支付 商户消费 XXX",
             Regex("""你在\s*([^\n，,。；;]{2,40}?)\s*有一笔""") to "命中模式：你在 XXX 有一笔"
         )
     }

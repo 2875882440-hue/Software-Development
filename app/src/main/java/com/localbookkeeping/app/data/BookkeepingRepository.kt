@@ -531,7 +531,10 @@ class BookkeepingRepository(
         finalCategory: String = "",
         isPaymentRelated: Boolean = isPaymentNotification,
         isParsed: Boolean = pendingCreated,
-        failReason: String = failureReason
+        failReason: String = failureReason,
+        amountCandidates: String = "",
+        selectedAmount: String = "",
+        selectedReason: String = ""
     ) {
         requireNotNull(debugNotificationLogDao) { "Debug notification log DAO is not configured." }
             .updateParseResult(
@@ -548,7 +551,10 @@ class BookkeepingRepository(
                 finalCategory = finalCategory,
                 isPaymentRelated = isPaymentRelated,
                 isParsed = isParsed,
-                failReason = failReason
+                failReason = failReason,
+                amountCandidates = amountCandidates,
+                selectedAmount = selectedAmount,
+                selectedReason = selectedReason
             )
     }
 

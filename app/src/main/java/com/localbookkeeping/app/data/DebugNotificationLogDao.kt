@@ -32,7 +32,10 @@ interface DebugNotificationLogDao {
             finalCategory = :finalCategory,
             isPaymentRelated = :isPaymentRelated,
             isParsed = :isParsed,
-            failReason = :failReason
+            failReason = :failReason,
+            amountCandidates = :amountCandidates,
+            selectedAmount = :selectedAmount,
+            selectedReason = :selectedReason
         WHERE id = :id
         """
     )
@@ -50,6 +53,9 @@ interface DebugNotificationLogDao {
         finalCategory: String,
         isPaymentRelated: Boolean,
         isParsed: Boolean,
-        failReason: String
+        failReason: String,
+        amountCandidates: String,
+        selectedAmount: String,
+        selectedReason: String
     )
 }

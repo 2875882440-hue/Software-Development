@@ -17,6 +17,7 @@ data class DebugNotificationLog(
     val receivedAtMillis: Long,
     val parseStatus: String,
     val failureReason: String,
+    val notificationKey: String = "",
     val isPaymentNotification: Boolean = false,
     val hasAmount: Boolean = false,
     val pendingCreated: Boolean = false,
@@ -31,5 +32,8 @@ data class DebugNotificationLog(
     val failReason: String = "",
     val serviceAlive: Boolean = false,
     val appInBackground: Boolean = false,
-    val screenLocked: Boolean = false
+    val screenLocked: Boolean = false,
+    val amountCandidates: String = "",
+    val selectedAmount: String = "",
+    val selectedReason: String = ""
 )

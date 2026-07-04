@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         BackgroundStabilityLog::class,
         MerchantCategoryLearning::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -45,7 +45,8 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_7_8,
                     MIGRATION_8_9,
                     MIGRATION_9_10,
-                    MIGRATION_10_11
+                    MIGRATION_10_11,
+                    MIGRATION_11_12
                 ).build().also { instance = it }
             }
 
@@ -198,6 +199,15 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_merchant_category_learning_merchantNormalized_category_sourceApp ON merchant_category_learning(merchantNormalized, category, sourceApp)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_merchant_category_learning_merchantNormalized ON merchant_category_learning(merchantNormalized)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_merchant_category_learning_lastUsedAt ON merchant_category_learning(lastUsedAt)")
+            }
+        }
+
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE debug_notification_logs ADD COLUMN notificationKey TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE debug_notification_logs ADD COLUMN amountCandidates TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE debug_notification_logs ADD COLUMN selectedAmount TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE debug_notification_logs ADD COLUMN selectedReason TEXT NOT NULL DEFAULT ''")
             }
         }
     }
