@@ -11,6 +11,7 @@ enum class RebindAttemptStatus {
     ATTEMPTED,
     COOLDOWN,
     PERMISSION_MISSING,
+    VENDOR_REAUTH_REQUIRED,
     UNSUPPORTED
 }
 
@@ -31,6 +32,7 @@ object ListenerRecoveryManager {
         nowMillis: Long = System.currentTimeMillis()
     ): ListenerHealthEvaluation {
         val appContext = context.applicationContext
+        val deviceCompatInfo = DeviceCompatInfo.current()
         val runtimeState = NotificationListenerState.current(appContext)
         val foregroundRunning = KeepAliveNotificationService.isRunning(appContext)
         var evaluation = ListenerHealthEvaluator.evaluate(
@@ -42,12 +44,13 @@ object ListenerRecoveryManager {
                 lastHeartbeatAt = runtimeState.lastHeartbeatTime,
                 autoListenEnabled = KeepAliveNotificationService.isEnabled(appContext),
                 foregroundServiceRunning = foregroundRunning,
+                isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice,
                 nowMillis = nowMillis
             )
         )
         val shouldProbe = NotificationListenerState.isPermissionEnabled(appContext) &&
             foregroundRunning &&
-            (probeWhenHealthy || evaluation.status == ListenerServiceStatus.SUSPICIOUS)
+            (probeWhenHealthy || shouldProbeFor(evaluation.status))
         var probeFailed = false
         var probeSucceeded = false
         if (shouldProbe) {
@@ -63,7 +66,8 @@ object ListenerRecoveryManager {
                         lastDisconnectedAt = refreshed.lastDisconnectedTime,
                         lastHeartbeatAt = refreshed.lastHeartbeatTime,
                         autoListenEnabled = KeepAliveNotificationService.isEnabled(appContext),
-                        foregroundServiceRunning = foregroundRunning
+                        foregroundServiceRunning = foregroundRunning,
+                        isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice
                     )
                 )
             } else if (probeResult == false) {
@@ -77,10 +81,14 @@ object ListenerRecoveryManager {
                         lastHeartbeatAt = runtimeState.lastHeartbeatTime,
                         autoListenEnabled = KeepAliveNotificationService.isEnabled(appContext),
                         foregroundServiceRunning = foregroundRunning,
-                        testNotificationFailed = true
+                        testNotificationFailed = true,
+                        isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice
                     )
                 )
             }
+        }
+        if (evaluation.status == ListenerServiceStatus.VENDOR_BLOCKED) {
+            ListenerRecoveryState.markVendorCompatCheck(appContext, nowMillis, deviceCompatInfo.vendorCompatSuggestion)
         }
         if (probeSucceeded && evaluation.status == ListenerServiceStatus.HEALTHY) {
             ListenerRecoveryState.clearListenerRecheckNeeded(appContext)
@@ -101,8 +109,14 @@ object ListenerRecoveryManager {
 
         val heartbeatStale = runtimeState.lastHeartbeatTime <= 0L ||
             nowMillis - runtimeState.lastHeartbeatTime > ListenerHealthEvaluator.HEARTBEAT_STALE_MILLIS
-        val shouldAttemptRecovery = evaluation.status == ListenerServiceStatus.DISCONNECTED ||
-            (evaluation.status == ListenerServiceStatus.SUSPICIOUS && (probeFailed || heartbeatStale))
+        val shouldAttemptRecovery = evaluation.status != ListenerServiceStatus.VENDOR_BLOCKED &&
+            (
+                evaluation.status == ListenerServiceStatus.DISCONNECTED ||
+                    evaluation.status == ListenerServiceStatus.PERMISSION_GRANTED_BUT_NOT_CONNECTED ||
+                    evaluation.status == ListenerServiceStatus.FOREGROUND_RUNNING_BUT_LISTENER_DEAD ||
+                    evaluation.status == ListenerServiceStatus.PROBE_FAILED ||
+                    (evaluation.status == ListenerServiceStatus.SUSPICIOUS && (probeFailed || heartbeatStale))
+                )
         if (shouldAttemptRecovery) {
             maybeRequestRebind(appContext, repository, evaluation, source, forceRebind, nowMillis, probeFailed)
         }
@@ -188,6 +202,40 @@ object ListenerRecoveryManager {
         if (!NotificationListenerState.isPermissionEnabled(context)) {
             return RebindAttemptOutcome(RebindAttemptStatus.PERMISSION_MISSING, false, false, "permissionMissing")
         }
+        val deviceCompatInfo = DeviceCompatInfo.current()
+        if (afterProbeFail && deviceCompatInfo.isHuaweiHonorDevice) {
+            ListenerRecoveryState.markVendorCompatCheck(context, nowMillis, deviceCompatInfo.vendorCompatSuggestion)
+            ListenerRecoveryState.markHealthCheck(
+                context,
+                ListenerHealthEvaluation(
+                    ListenerServiceStatus.VENDOR_BLOCKED,
+                    listOf(
+                        "权限已授权，但监听服务未实际连接",
+                        "疑似 HarmonyOS 后台策略拦截",
+                        "请重新授权通知监听权限"
+                    )
+                ),
+                nowMillis
+            )
+            repository.addBackgroundStabilityLog(
+                BackgroundEventType.HEALTH_VENDOR_BLOCKED,
+                "vendorBlocked",
+                "source=$source,device=${deviceCompatInfo.deviceName},rom=${deviceCompatInfo.detectedRomType}",
+                nowMillis
+            )
+            repository.addBackgroundStabilityLog(
+                BackgroundEventType.REQUEST_REBIND_RESULT,
+                "vendorReauthRequired",
+                "source=$source,skipRequestRebind=true",
+                nowMillis
+            )
+            return RebindAttemptOutcome(
+                RebindAttemptStatus.VENDOR_REAUTH_REQUIRED,
+                false,
+                false,
+                "vendorReauthRequired"
+            )
+        }
 
         val lastAttemptAt = ListenerRecoveryState.snapshot(context).lastRebindAttemptAt
         if (!forceRebind && !ListenerRecoveryPolicy.canAttemptRebind(nowMillis, lastAttemptAt)) {
@@ -245,11 +293,31 @@ object ListenerRecoveryManager {
         )
     }
 
+    private fun shouldProbeFor(status: ListenerServiceStatus): Boolean = when (status) {
+        ListenerServiceStatus.HEALTHY -> false
+        ListenerServiceStatus.PERMISSION_MISSING -> false
+        ListenerServiceStatus.SERVICE_UNKNOWN -> false
+        ListenerServiceStatus.STALE,
+        ListenerServiceStatus.SUSPICIOUS,
+        ListenerServiceStatus.DISCONNECTED,
+        ListenerServiceStatus.PERMISSION_GRANTED_BUT_NOT_CONNECTED,
+        ListenerServiceStatus.FOREGROUND_RUNNING_BUT_LISTENER_DEAD,
+        ListenerServiceStatus.VENDOR_BLOCKED,
+        ListenerServiceStatus.PROBE_FAILED -> true
+    }
+
     private fun eventTypeFor(status: ListenerServiceStatus): String = when (status) {
         ListenerServiceStatus.HEALTHY -> BackgroundEventType.HEALTH_HEALTHY
+        ListenerServiceStatus.STALE -> BackgroundEventType.HEALTH_STALE
         ListenerServiceStatus.SUSPICIOUS -> BackgroundEventType.HEALTH_SUSPICIOUS
         ListenerServiceStatus.DISCONNECTED -> BackgroundEventType.HEALTH_DISCONNECTED
         ListenerServiceStatus.PERMISSION_MISSING -> BackgroundEventType.HEALTH_PERMISSION_MISSING
+        ListenerServiceStatus.PERMISSION_GRANTED_BUT_NOT_CONNECTED ->
+            BackgroundEventType.HEALTH_PERMISSION_GRANTED_BUT_NOT_CONNECTED
+        ListenerServiceStatus.FOREGROUND_RUNNING_BUT_LISTENER_DEAD ->
+            BackgroundEventType.HEALTH_FOREGROUND_RUNNING_BUT_LISTENER_DEAD
+        ListenerServiceStatus.VENDOR_BLOCKED -> BackgroundEventType.HEALTH_VENDOR_BLOCKED
+        ListenerServiceStatus.PROBE_FAILED -> BackgroundEventType.HEALTH_PROBE_FAILED
         ListenerServiceStatus.SERVICE_UNKNOWN -> BackgroundEventType.HEALTH_SERVICE_UNKNOWN
     }
 

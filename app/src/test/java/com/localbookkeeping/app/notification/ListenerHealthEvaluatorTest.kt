@@ -22,7 +22,7 @@ class ListenerHealthEvaluatorTest {
     }
 
     @Test
-    fun suspiciousWhenHeartbeatIsStale() {
+    fun staleWhenHeartbeatIsStale() {
         val result = ListenerHealthEvaluator.evaluate(
             ListenerHealthInput(
                 notificationPermissionEnabled = true,
@@ -34,12 +34,12 @@ class ListenerHealthEvaluatorTest {
             )
         )
 
-        assertEquals(ListenerServiceStatus.SUSPICIOUS, result.status)
+        assertEquals(ListenerServiceStatus.STALE, result.status)
         assertTrue(result.reasons.any { it.contains("心跳") })
     }
 
     @Test
-    fun suspiciousWhenProbeFailedEvenWithFreshHeartbeat() {
+    fun probeFailedWhenProbeFailedEvenWithFreshHeartbeat() {
         val result = ListenerHealthEvaluator.evaluate(
             ListenerHealthInput(
                 notificationPermissionEnabled = true,
@@ -52,8 +52,48 @@ class ListenerHealthEvaluatorTest {
             )
         )
 
-        assertEquals(ListenerServiceStatus.SUSPICIOUS, result.status)
-        assertTrue(result.reasons.any { it.contains("测试通知") })
+        assertEquals(ListenerServiceStatus.PROBE_FAILED, result.status)
+        assertTrue(result.reasons.any { it.contains("探测通知") })
+    }
+
+    @Test
+    fun permissionGrantedButNotConnectedWhenForegroundRunsAndProbeFails() {
+        val result = ListenerHealthEvaluator.evaluate(
+            ListenerHealthInput(
+                notificationPermissionEnabled = true,
+                listenerConnected = false,
+                rawListenerConnected = false,
+                lastDisconnectedAt = 0L,
+                lastHeartbeatAt = 10_000L,
+                autoListenEnabled = true,
+                foregroundServiceRunning = true,
+                testNotificationFailed = true,
+                nowMillis = 20_000L
+            )
+        )
+
+        assertEquals(ListenerServiceStatus.PERMISSION_GRANTED_BUT_NOT_CONNECTED, result.status)
+    }
+
+    @Test
+    fun vendorBlockedWhenHuaweiHonorForegroundRunsAndProbeFails() {
+        val result = ListenerHealthEvaluator.evaluate(
+            ListenerHealthInput(
+                notificationPermissionEnabled = true,
+                listenerConnected = false,
+                rawListenerConnected = false,
+                lastDisconnectedAt = 12_000L,
+                lastHeartbeatAt = 10_000L,
+                autoListenEnabled = true,
+                foregroundServiceRunning = true,
+                testNotificationFailed = true,
+                isHuaweiHonorDevice = true,
+                nowMillis = 20_000L
+            )
+        )
+
+        assertEquals(ListenerServiceStatus.VENDOR_BLOCKED, result.status)
+        assertTrue(result.reasons.any { it.contains("未实际连接") })
     }
 
     @Test
@@ -66,7 +106,7 @@ class ListenerHealthEvaluatorTest {
                 lastDisconnectedAt = 12_000L,
                 lastHeartbeatAt = 10_000L,
                 autoListenEnabled = true,
-                foregroundServiceRunning = true,
+                foregroundServiceRunning = false,
                 nowMillis = 20_000L
             )
         )
@@ -91,7 +131,7 @@ class ListenerHealthEvaluatorTest {
     }
 
     @Test
-    fun serviceUnknownWhenThereIsNoStateYet() {
+    fun staleWhenThereIsNoStateYet() {
         val result = ListenerHealthEvaluator.evaluate(
             ListenerHealthInput(
                 notificationPermissionEnabled = true,
@@ -105,6 +145,6 @@ class ListenerHealthEvaluatorTest {
             )
         )
 
-        assertEquals(ListenerServiceStatus.SUSPICIOUS, result.status)
+        assertEquals(ListenerServiceStatus.STALE, result.status)
     }
 }

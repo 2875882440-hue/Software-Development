@@ -1,6 +1,8 @@
 package com.localbookkeeping.app
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,6 +15,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.ComponentActivity
@@ -85,6 +88,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.localbookkeeping.app.backup.LocalBackupManager
+import com.localbookkeeping.app.diagnostics.ProblemLogExporter
+import com.localbookkeeping.app.diagnostics.ProblemLogSnapshot
 import com.localbookkeeping.app.data.ClassificationRule
 import com.localbookkeeping.app.data.BackgroundEventType
 import com.localbookkeeping.app.data.BackgroundDiagnosticsCalculator
@@ -104,6 +109,7 @@ import com.localbookkeeping.app.limit.DailyLimitNotifier
 import com.localbookkeeping.app.limit.DailyLimitStatus
 import com.localbookkeeping.app.notification.KeepAliveNotificationService
 import com.localbookkeeping.app.notification.AmountCandidate
+import com.localbookkeeping.app.notification.DeviceCompatInfo
 import com.localbookkeeping.app.notification.ListenerHealthEvaluator
 import com.localbookkeeping.app.notification.ListenerHealthInput
 import com.localbookkeeping.app.notification.ListenerRecoveryManager
@@ -419,6 +425,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
         if (listenerRescueState.running) return
         listenerRescueState = ListenerRescueUiState(running = true, finalConclusion = "正在检查...")
         coroutineScope.launch {
+            val deviceCompatInfo = DeviceCompatInfo.current()
             app.repository.addBackgroundStabilityLog(
                 BackgroundEventType.LISTENER_RESCUE,
                 "listenerRescueStart"
@@ -501,6 +508,24 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                 return@launch
             }
 
+            if (firstProbe == false && deviceCompatInfo.isHuaweiHonorDevice) {
+                val now = System.currentTimeMillis()
+                ListenerRecoveryState.markVendorCompatCheck(context, now, deviceCompatInfo.vendorCompatSuggestion)
+                app.repository.addBackgroundStabilityLog(
+                    BackgroundEventType.HEALTH_VENDOR_BLOCKED,
+                    "vendorBlocked",
+                    "source=listenerRescueInitialProbe,device=${deviceCompatInfo.deviceName},rom=${deviceCompatInfo.detectedRomType}",
+                    now
+                )
+                listenerRescueState = listenerRescueState.copy(
+                    running = false,
+                    rebindResult = "已跳过：需要重新授权通知监听",
+                    finalConclusion = "需要重新授权通知监听，请关闭本 APP 通知监听权限，等待 5 秒后重新开启"
+                )
+                healthRefreshTick = System.currentTimeMillis()
+                return@launch
+            }
+
             val rebind = ListenerRecoveryManager.requestRebindNow(
                 context = context,
                 repository = app.repository,
@@ -512,6 +537,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                     RebindAttemptStatus.ATTEMPTED -> "已尝试重绑"
                     RebindAttemptStatus.COOLDOWN -> "冷却中"
                     RebindAttemptStatus.PERMISSION_MISSING -> "权限缺失，无法重绑"
+                    RebindAttemptStatus.VENDOR_REAUTH_REQUIRED -> "已跳过：需要重新授权通知监听"
                     RebindAttemptStatus.UNSUPPORTED -> "系统不支持自动重绑"
                 }
             )
@@ -544,6 +570,112 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
             )
             healthRefreshTick = System.currentTimeMillis()
         }
+    }
+
+    fun runOneClickRepair(source: String) {
+        rebindMessage = "正在重新探测监听..."
+        notificationAccessEnabled = isNotificationListenerEnabled(context)
+        healthRefreshTick = System.currentTimeMillis()
+        coroutineScope.launch {
+            val deviceCompatInfo = DeviceCompatInfo.current()
+            val permissionGranted = NotificationListenerState.isPermissionEnabled(context)
+            if (!permissionGranted) {
+                viewModel.addBackgroundEvent(BackgroundEventType.LISTENER_RESCUE, "$source:permissionMissing")
+                rebindMessage = "请先开启通知监听权限"
+                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                healthRefreshTick = System.currentTimeMillis()
+                return@launch
+            }
+
+            if (!KeepAliveNotificationService.isRunning(context)) {
+                KeepAliveNotificationService.start(context)
+                viewModel.addBackgroundEvent(BackgroundEventType.AUTO_LISTEN_RESTORE, "$source:startForegroundService")
+                delay(1_000)
+            }
+
+            val firstProbe = ListenerRecoveryManager.runProbeCheck(
+                context = context,
+                repository = app.repository,
+                source = "$source:probe"
+            )
+            if (firstProbe == true) {
+                ListenerRecoveryState.clearListenerRecheckNeeded(context)
+                rebindMessage = "监听已恢复正常"
+                healthRefreshTick = System.currentTimeMillis()
+                return@launch
+            }
+
+            if (firstProbe == false && deviceCompatInfo.isHuaweiHonorDevice) {
+                val now = System.currentTimeMillis()
+                ListenerRecoveryState.markVendorCompatCheck(context, now, deviceCompatInfo.vendorCompatSuggestion)
+                app.repository.addBackgroundStabilityLog(
+                    BackgroundEventType.HEALTH_VENDOR_BLOCKED,
+                    "vendorBlocked",
+                    "source=$source,device=${deviceCompatInfo.deviceName},rom=${deviceCompatInfo.detectedRomType}",
+                    now
+                )
+                rebindMessage = "需要重新授权通知监听：请关闭本 APP 通知监听权限，等待 5 秒后重新开启，再返回 APP 恢复自动监听"
+                healthRefreshTick = System.currentTimeMillis()
+                return@launch
+            }
+
+            if (firstProbe == null) {
+                rebindMessage = "探测通知发送失败，请先允许本 APP 通知权限"
+                healthRefreshTick = System.currentTimeMillis()
+                return@launch
+            }
+
+            val rebind = ListenerRecoveryManager.requestRebindNow(
+                context = context,
+                repository = app.repository,
+                source = "$source:requestRebind",
+                afterProbeFail = true
+            )
+            rebindMessage = when (rebind.status) {
+                RebindAttemptStatus.ATTEMPTED -> "已请求系统重新绑定通知监听，正在复查..."
+                RebindAttemptStatus.COOLDOWN -> "requestRebind 冷却中，请稍后再试"
+                RebindAttemptStatus.PERMISSION_MISSING -> "通知监听权限缺失，请重新开启"
+                RebindAttemptStatus.VENDOR_REAUTH_REQUIRED -> "需要重新授权通知监听"
+                RebindAttemptStatus.UNSUPPORTED -> "当前系统不支持 requestRebind，请手动重新授权"
+            }
+            val secondProbe = if (rebind.status == RebindAttemptStatus.ATTEMPTED) {
+                ListenerRecoveryManager.runProbeCheck(
+                    context = context,
+                    repository = app.repository,
+                    source = "$source:afterRebindProbe"
+                )
+            } else {
+                false
+            }
+            rebindMessage = when {
+                secondProbe == true -> "监听已重新连接"
+                rebind.status == RebindAttemptStatus.COOLDOWN -> "requestRebind 冷却中，请稍后再重新探测"
+                else -> "监听仍未恢复，请关闭再重新开启通知监听权限"
+            }
+            healthRefreshTick = System.currentTimeMillis()
+        }
+    }
+
+    fun buildProblemLog(): String =
+        buildProblemLogText(
+            context = context,
+            logs = uiState.backgroundStabilityLogs
+        )
+
+    fun copyProblemLog() {
+        val text = buildProblemLog()
+        val clipboard = context.getSystemService(ClipboardManager::class.java)
+        clipboard?.setPrimaryClip(ClipData.newPlainText("本地自动记账问题日志", text))
+        Toast.makeText(context, "问题日志已复制，可以发送给开发者。", Toast.LENGTH_SHORT).show()
+    }
+
+    fun shareProblemLog() {
+        val text = buildProblemLog()
+        val shareIntent = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, "本地自动记账 - 问题日志")
+            .putExtra(Intent.EXTRA_TEXT, text)
+        context.startActivity(Intent.createChooser(shareIntent, "分享问题日志"))
     }
 
     fun restoreAutoListen(source: String) {
@@ -759,29 +891,10 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                         dailyLimitConfig = DailyLimitManager.load(context)
                         suppressInitialLimitAlert = true
                     },
-                    onOneClickRepair = {
-                        viewModel.addBackgroundEvent(BackgroundEventType.REQUEST_REBIND, "一键修复 requestRebind")
-                        val called = NotificationListenerState.requestRebind(context)
-                        rebindMessage = if (called) "requestRebind called" else "requestRebind unavailable"
-                        notificationAccessEnabled = isNotificationListenerEnabled(context)
-                        healthRefreshTick = System.currentTimeMillis()
-                        coroutineScope.launch {
-                            delay(3_000)
-                            val connected = NotificationListenerState.isConnected(context)
-                            viewModel.addBackgroundEvent(
-                                BackgroundEventType.REQUEST_REBIND_RESULT,
-                                if (connected) "requestRebindConnected" else "requestRebindNotConnected"
-                            )
-                            rebindMessage = if (connected) {
-                                "监听已重新连接"
-                            } else {
-                                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                                "已打开通知监听权限设置，请关闭再重新开启本地自动记账"
-                            }
-                            healthRefreshTick = System.currentTimeMillis()
-                        }
-                    },
+                    onOneClickRepair = { runOneClickRepair("listenerTabOneClickRepair") },
                     onListenerRescue = ::runListenerRescue,
+                    onCopyProblemLog = ::copyProblemLog,
+                    onShareProblemLog = ::shareProblemLog,
                     onOpenNotificationSettings = {
                         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     }
@@ -974,28 +1087,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                             healthRefreshTick = System.currentTimeMillis()
                         }
                     },
-                    onOneClickRepair = {
-                        viewModel.addBackgroundEvent(BackgroundEventType.REQUEST_REBIND, "一键修复 requestRebind")
-                        val called = NotificationListenerState.requestRebind(context)
-                        rebindMessage = if (called) "requestRebind called" else "requestRebind unavailable"
-                        notificationAccessEnabled = isNotificationListenerEnabled(context)
-                        healthRefreshTick = System.currentTimeMillis()
-                        coroutineScope.launch {
-                            delay(3_000)
-                            val connected = NotificationListenerState.isConnected(context)
-                            viewModel.addBackgroundEvent(
-                                BackgroundEventType.REQUEST_REBIND_RESULT,
-                                if (connected) "requestRebindConnected" else "requestRebindNotConnected"
-                            )
-                            rebindMessage = if (connected) {
-                                "监听已重新连接"
-                            } else {
-                                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                                "已打开通知监听权限设置，请关闭再重新开启本地自动记账"
-                            }
-                            healthRefreshTick = System.currentTimeMillis()
-                        }
-                    },
+                    onOneClickRepair = { runOneClickRepair("healthScreenOneClickRepair") },
                     onReauthorizeNotificationListener = {
                         rebindMessage = "请在系统设置中关闭再重新开启本地自动记账的通知监听权限"
                         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -1065,7 +1157,9 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                     logs = uiState.backgroundStabilityLogs,
                     notificationLogs = uiState.debugNotificationLogs,
                     records = uiState.confirmedRecords,
-                    onBack = ::navigateBack
+                    onBack = ::navigateBack,
+                    onCopyProblemLog = ::copyProblemLog,
+                    onShareProblemLog = ::shareProblemLog
                 )
 
                 AppScreen.TROUBLESHOOTING -> PaymentTroubleshootingScreen(
@@ -1329,6 +1423,8 @@ private fun MainTabsScreen(
     onToggleDailyLimit: (Boolean) -> Unit,
     onOneClickRepair: () -> Unit,
     onListenerRescue: () -> Unit,
+    onCopyProblemLog: () -> Unit,
+    onShareProblemLog: () -> Unit,
     onOpenNotificationSettings: () -> Unit
 ) {
     Scaffold(
@@ -1426,7 +1522,9 @@ private fun MainTabsScreen(
                 onOpenTroubleshooting = onOpenTroubleshooting,
                 onOpenWechatScanBackfill = onOpenWechatScanBackfill,
                 onOneClickRepair = onOneClickRepair,
-                onListenerRescue = onListenerRescue
+                onListenerRescue = onListenerRescue,
+                onCopyProblemLog = onCopyProblemLog,
+                onShareProblemLog = onShareProblemLog
             )
         }
     }
@@ -1836,7 +1934,9 @@ private fun ListenerTabContent(
     onOpenTroubleshooting: () -> Unit,
     onOpenWechatScanBackfill: () -> Unit,
     onOneClickRepair: () -> Unit,
-    onListenerRescue: () -> Unit
+    onListenerRescue: () -> Unit,
+    onCopyProblemLog: () -> Unit,
+    onShareProblemLog: () -> Unit
 ) {
     LazyColumn(
         state = listState,
@@ -1859,6 +1959,22 @@ private fun ListenerTabContent(
                 onRestoreAutoListen = onRestoreAutoListen,
                 onOneClickRepair = onOneClickRepair,
                 onListenerRescue = onListenerRescue
+            )
+        }
+        item {
+            ListenerPermissionGuideCard(
+                notificationAccessEnabled = notificationAccessEnabled,
+                healthRefreshTick = healthRefreshTick,
+                onOpenNotificationSettings = onOpenNotificationSettings,
+                onOpenBackgroundSettings = onOpenBackgroundSettings,
+                onRestoreAutoListen = onRestoreAutoListen,
+                onListenerRescue = onListenerRescue
+            )
+        }
+        item {
+            ProblemLogActionsCard(
+                onCopyProblemLog = onCopyProblemLog,
+                onShareProblemLog = onShareProblemLog
             )
         }
         item {
@@ -1895,6 +2011,96 @@ private fun ListenerTabContent(
 }
 
 @Composable
+private fun ProblemLogActionsCard(
+    onCopyProblemLog: () -> Unit,
+    onShareProblemLog: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("导出问题日志", color = PrimaryText, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(modifier = Modifier.weight(1f), onClick = onCopyProblemLog) {
+                    Text("复制问题日志")
+                }
+                OutlinedButton(modifier = Modifier.weight(1f), onClick = onShareProblemLog) {
+                    Text("分享问题日志")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ListenerPermissionGuideCard(
+    notificationAccessEnabled: Boolean,
+    healthRefreshTick: Long,
+    onOpenNotificationSettings: () -> Unit,
+    onOpenBackgroundSettings: () -> Unit,
+    onRestoreAutoListen: () -> Unit,
+    onListenerRescue: () -> Unit
+) {
+    val context = LocalContext.current
+    healthRefreshTick.hashCode()
+    val runtimeState = NotificationListenerState.current(context)
+    val autoEnabled = KeepAliveNotificationService.isEnabled(context)
+    val foregroundRunning = KeepAliveNotificationService.isRunning(context)
+    val deviceCompatInfo = DeviceCompatInfo.current()
+    val probeSnapshot = com.localbookkeeping.app.notification.ListenerProbeNotification.snapshot(context)
+    val health = ListenerHealthEvaluator.evaluate(
+        ListenerHealthInput(
+            notificationPermissionEnabled = notificationAccessEnabled,
+            listenerConnected = runtimeState.listenerConnected,
+            rawListenerConnected = runtimeState.rawListenerConnected,
+            lastDisconnectedAt = runtimeState.lastDisconnectedTime,
+            lastHeartbeatAt = runtimeState.lastHeartbeatTime,
+            autoListenEnabled = autoEnabled,
+            foregroundServiceRunning = foregroundRunning,
+            testNotificationFailed = probeSnapshot.latestProbeFailed,
+            isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice
+        )
+    )
+    val shouldGuide = !notificationAccessEnabled ||
+        !autoEnabled ||
+        !foregroundRunning ||
+        health.status != ListenerServiceStatus.HEALTHY
+
+    if (!shouldGuide) return
+
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FBFF))) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("需要手动开启系统权限", color = PrimaryText, fontWeight = FontWeight.Bold)
+            Text(
+                "系统可能不会允许 APP 直接恢复通知监听。请按下面顺序检查权限，完成后返回本页重新探测监听。",
+                color = MutedText,
+                fontSize = 13.sp
+            )
+            listOf(
+                "1. 通知监听权限：打开后找到本地自动记账，先关闭，等待 5 秒，再重新开启。",
+                "2. 应用后台设置：允许自启动、关联启动、后台活动，电池设置为不优化或不受限制。",
+                "3. 通知权限：允许本 APP、微信、支付宝通知，并允许锁屏通知和横幅通知。",
+                "4. 回到 APP 后点击恢复自动监听，再点击重新探测监听。"
+            ).forEach { Text(it, color = PrimaryText, fontSize = 13.sp) }
+
+            Button(modifier = Modifier.fillMaxWidth(), onClick = onOpenNotificationSettings) {
+                Text("去开启通知监听权限")
+            }
+            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenBackgroundSettings) {
+                Text("查看后台权限设置引导")
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    onRestoreAutoListen()
+                    onListenerRescue()
+                }
+            ) {
+                Text("恢复自动监听并重新探测")
+            }
+        }
+    }
+}
+
+@Composable
 private fun ListenerStatusCard(
     notificationAccessEnabled: Boolean,
     healthRefreshTick: Long,
@@ -1911,6 +2117,7 @@ private fun ListenerStatusCard(
     healthRefreshTick.hashCode()
     val autoEnabled = KeepAliveNotificationService.isEnabled(context)
     val foregroundRunning = KeepAliveNotificationService.isRunning(context)
+    val deviceCompatInfo = DeviceCompatInfo.current()
     val recoverySnapshot = ListenerRecoveryState.snapshot(context)
     val probeSnapshot = com.localbookkeeping.app.notification.ListenerProbeNotification.snapshot(context)
     val health = ListenerHealthEvaluator.evaluate(
@@ -1922,7 +2129,8 @@ private fun ListenerStatusCard(
             lastHeartbeatAt = runtimeState.lastHeartbeatTime,
             autoListenEnabled = autoEnabled,
             foregroundServiceRunning = foregroundRunning,
-            testNotificationFailed = probeSnapshot.latestProbeFailed
+            testNotificationFailed = probeSnapshot.latestProbeFailed,
+            isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice
         )
     )
 
@@ -1934,6 +2142,9 @@ private fun ListenerStatusCard(
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("监听健康状态",  color = PrimaryText, fontWeight = FontWeight.Bold)
+            HealthStatusRow("当前设备", deviceCompatInfo.deviceName)
+            HealthStatusRow("系统", deviceCompatInfo.systemLabel)
+            HealthStatusRow("兼容模式", deviceCompatInfo.compatibilityModeLabel)
             HealthStatusRow("通知监听权限", if (notificationAccessEnabled) "已授权" else "未授权")
             HealthStatusRow("监听状态", listenerStatusLabel(health.status))
             HealthStatusRow("自动监听", if (autoEnabled) "已启用" else "未启用")
@@ -1951,6 +2162,13 @@ private fun ListenerStatusCard(
             HealthStatusRow("上次失败原因", recoverySnapshot.lastFailureReason.ifBlank { "暂无" })
             if (health.status != ListenerServiceStatus.HEALTHY) {
                 Text("监听状态异常，请尝试一键修复或重新授权。",  color = Orange, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+            if (health.status == ListenerServiceStatus.VENDOR_BLOCKED) {
+                VendorCompatWarning(
+                    onOpenNotificationSettings = onOpenNotificationSettings,
+                    onRestoreAutoListen = onRestoreAutoListen,
+                    onListenerRescue = onListenerRescue
+                )
             }
             if (recoverySnapshot.needsListenerRecheck) {
                 Text("系统提示需要重新检查监听连接。",  color = Orange, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
@@ -1998,6 +2216,49 @@ private fun ListenerStatusCard(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun VendorCompatWarning(
+    onOpenNotificationSettings: () -> Unit,
+    onRestoreAutoListen: () -> Unit,
+    onListenerRescue: () -> Unit
+) {
+    val context = LocalContext.current
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E8))) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("荣耀 / 华为系统可能拦截了通知监听服务", color = Orange, fontWeight = FontWeight.Bold)
+            Text(
+                "当前权限看起来已开启，但系统没有真正连接通知监听服务。请重新授权通知监听，并检查后台运行权限。",
+                color = PrimaryText,
+                fontSize = 13.sp
+            )
+            Text(
+                "操作：关闭本 APP 的通知监听权限，等待 5 秒，再重新开启。返回 APP 后点击恢复自动监听或重新探测监听。",
+                color = MutedText,
+                fontSize = 13.sp
+            )
+            Button(modifier = Modifier.fillMaxWidth(), onClick = onOpenNotificationSettings) {
+                Text("重新打开通知监听权限")
+            }
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    context.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+                    )
+                }
+            ) {
+                Text("打开应用后台设置")
+            }
+            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
+                onRestoreAutoListen()
+                onListenerRescue()
+            }) {
+                Text("重新探测监听")
             }
         }
     }
@@ -2174,6 +2435,8 @@ private fun NotificationAccessCard(
             healthRefreshTick.hashCode()
             val autoEnabled = KeepAliveNotificationService.isEnabled(LocalContext.current)
             val foregroundRunning = KeepAliveNotificationService.isRunning(LocalContext.current)
+            val deviceCompatInfo = DeviceCompatInfo.current()
+            val probeSnapshot = com.localbookkeeping.app.notification.ListenerProbeNotification.snapshot(LocalContext.current)
             val recoverySnapshot = ListenerRecoveryState.snapshot(LocalContext.current)
             val health = ListenerHealthEvaluator.evaluate(
                 ListenerHealthInput(
@@ -2183,7 +2446,9 @@ private fun NotificationAccessCard(
                     lastDisconnectedAt = runtimeState.lastDisconnectedTime,
                     lastHeartbeatAt = runtimeState.lastHeartbeatTime,
                     autoListenEnabled = autoEnabled,
-                    foregroundServiceRunning = foregroundRunning
+                    foregroundServiceRunning = foregroundRunning,
+                    testNotificationFailed = probeSnapshot.latestProbeFailed,
+                    isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice
                 )
             )
             Row(
@@ -2763,6 +3028,9 @@ private fun ListenerHealthScreen(
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     HealthStatusRow("通知监听权限", health.notificationListenerPermission)
+                    HealthStatusRow("当前设备", health.deviceName)
+                    HealthStatusRow("系统", health.systemLabel)
+                    HealthStatusRow("兼容模式", health.compatibilityModeLabel)
                     HealthStatusRow("监听状态", health.listenerServiceStatus)
                     HealthStatusRow("监听原因", health.listenerServiceReasons.ifBlank { "无" })
                     HealthStatusRow("App 通知权限", health.appNotificationPermission)
@@ -2776,6 +3044,8 @@ private fun ListenerHealthScreen(
                     HealthStatusRow("最近连接", health.lastConnectedAt)
                     HealthStatusRow("最近断开", health.lastDisconnectedAt)
                     HealthStatusRow("最近心跳", health.lastHeartbeatAt)
+                    HealthStatusRow("最近探测成功", health.lastProbeSuccessAt)
+                    HealthStatusRow("最近探测失败", health.lastProbeFailAt)
                     HealthStatusRow("最近通知", health.lastNotificationAt)
                     HealthStatusRow("最近付款通知", health.lastPaymentNotificationAt)
                     HealthStatusRow("最近通知来源", health.lastNotificationPackage)
@@ -2789,6 +3059,18 @@ private fun ListenerHealthScreen(
                     HealthStatusRow("最后重绑结果", health.lastRebindResult)
                     HealthStatusRow("最后失败原因", health.lastFailureReason)
                     HealthStatusRow("付款通知摘要", health.paymentNotificationSummary)
+                }
+            }
+        }
+
+        if (health.vendorBlocked) {
+            item {
+                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E8))) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("荣耀 / 华为系统可能拦截了通知监听服务", color = Orange, fontWeight = FontWeight.Bold)
+                        Text("当前权限看起来已开启，但系统没有真正连接通知监听服务。请重新授权通知监听，并检查后台运行权限。", color = PrimaryText, fontSize = 13.sp)
+                        Text("请关闭本 APP 的通知监听权限，等待 5 秒，再重新开启。返回 APP 后点击恢复自动监听。", color = MutedText, fontSize = 13.sp)
+                    }
                 }
             }
         }
@@ -3148,6 +3430,23 @@ private fun BackgroundSettingsScreen(
                 }
             }
         }
+        if (health.isHuaweiHonorDevice) {
+            item {
+                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("荣耀 / 华为 / HarmonyOS 用户请检查", color = PrimaryText, fontWeight = FontWeight.Bold)
+                        listOf(
+                            "设置 > 应用 > 应用启动管理：找到本 APP，关闭自动管理，改为手动管理。",
+                            "手动管理中勾选：允许自启动、允许关联启动、允许后台活动。",
+                            "设置 > 电池：将本 APP 设置为不受限制 / 允许后台运行。",
+                            "设置 > 通知：允许本 APP 通知，并允许微信 / 支付宝通知。",
+                            "微信 / 支付宝通知中允许锁屏通知和横幅通知。",
+                            "设置 > 通知使用权 / 通知访问权限：关闭本 APP 权限，等待 5 秒后重新开启。"
+                        ).forEach { Text(it, color = MutedText, fontSize = 13.sp) }
+                    }
+                }
+            }
+        }
         item { Spacer(Modifier.height(24.dp)) }
     }
 }
@@ -3157,13 +3456,22 @@ private fun BackgroundReportScreen(
     logs: List<BackgroundStabilityLog>,
     notificationLogs: List<DebugNotificationLog>,
     records: List<ExpenseRecord>,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onCopyProblemLog: () -> Unit,
+    onShareProblemLog: () -> Unit
 ) {
     val since = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
     val recentLogs = logs.filter { it.createdAtMillis >= since }
     val recentNotifications = notificationLogs.filter { it.receivedAtMillis >= since }
     val recentRecords = records.filter { it.createdAtMillis >= since }
-    val report = BackgroundDiagnosticsCalculator.calculate(logs, since)
+    val report = BackgroundDiagnosticsCalculator.calculate(
+        logs = logs,
+        sinceMillis = since,
+        deviceCompatInfo = DeviceCompatInfo.current(),
+        listenerRuntimeState = NotificationListenerState.current(LocalContext.current),
+        probeSnapshot = com.localbookkeeping.app.notification.ListenerProbeNotification.snapshot(LocalContext.current),
+        recoverySnapshot = ListenerRecoveryState.snapshot(LocalContext.current)
+    )
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -3178,8 +3486,27 @@ private fun BackgroundReportScreen(
             Text("近 24 小时后台稳定性、通知监听和自动记账诊断。",  color = MutedText)
         }
         item {
+            ProblemLogActionsCard(
+                onCopyProblemLog = onCopyProblemLog,
+                onShareProblemLog = onShareProblemLog
+            )
+        }
+        item {
             Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HealthStatusRow("deviceBrand", report.deviceBrand)
+                    HealthStatusRow("manufacturer", report.manufacturer)
+                    HealthStatusRow("model", report.model)
+                    HealthStatusRow("osVersion", report.osVersion)
+                    HealthStatusRow("sdkVersion", "${report.sdkVersion}")
+                    HealthStatusRow("detectedRomType", report.detectedRomType)
+                    HealthStatusRow("isHuaweiHonorDevice", yesNo(report.isHuaweiHonorDevice))
+                    HealthStatusRow("lastListenerConnectedTime", formatOptionalDateTime(report.lastListenerConnectedTime))
+                    HealthStatusRow("lastListenerDisconnectedTime", formatOptionalDateTime(report.lastListenerDisconnectedTime))
+                    HealthStatusRow("lastProbeSuccessTime", formatOptionalDateTime(report.lastProbeSuccessTime))
+                    HealthStatusRow("lastProbeFailTime", formatOptionalDateTime(report.lastProbeFailTime))
+                    HealthStatusRow("lastVendorCompatCheckTime", formatOptionalDateTime(report.lastVendorCompatCheckTime))
+                    HealthStatusRow("vendorCompatSuggestion", report.vendorCompatSuggestion)
                     HealthStatusRow("App 启动次数", "${report.appStartCount}")
                     HealthStatusRow("监听连接次数", "${report.listenerConnectedCount}")
                     HealthStatusRow("监听断开次数", "${report.listenerDisconnectedCount}")
@@ -4754,6 +5081,7 @@ private fun buildListenerHealthStatus(
     val runtimeState = NotificationListenerState.current(context)
     val autoEnabled = KeepAliveNotificationService.isEnabled(context)
     val foregroundRunning = KeepAliveNotificationService.isRunning(context)
+    val deviceCompatInfo = DeviceCompatInfo.current()
     val probeSnapshot = com.localbookkeeping.app.notification.ListenerProbeNotification.snapshot(context)
     val evaluation = ListenerHealthEvaluator.evaluate(
         ListenerHealthInput(
@@ -4764,7 +5092,8 @@ private fun buildListenerHealthStatus(
             lastHeartbeatAt = runtimeState.lastHeartbeatTime,
             autoListenEnabled = autoEnabled,
             foregroundServiceRunning = foregroundRunning,
-            testNotificationFailed = probeSnapshot.latestProbeFailed
+            testNotificationFailed = probeSnapshot.latestProbeFailed,
+            isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice
         )
     )
     val listenerActive = evaluation.status == ListenerServiceStatus.HEALTHY
@@ -4785,6 +5114,13 @@ private fun buildListenerHealthStatus(
     }
     return ListenerHealthStatus(
         listenerServiceActive = listenerActive,
+        deviceName = deviceCompatInfo.deviceName,
+        systemLabel = deviceCompatInfo.systemLabel,
+        compatibilityModeLabel = deviceCompatInfo.compatibilityModeLabel,
+        detectedRomType = deviceCompatInfo.detectedRomType,
+        isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice,
+        vendorCompatSuggestion = deviceCompatInfo.vendorCompatSuggestion,
+        vendorBlocked = evaluation.status == ListenerServiceStatus.VENDOR_BLOCKED,
         notificationListenerPermission = if (listenerPermission) "已授权" else "未授权",
         listenerServiceStatus = listenerStatusLabel(evaluation.status),
         listenerServiceReasons = evaluation.reasons.joinToString(" / ").ifBlank { "?" },
@@ -4797,6 +5133,8 @@ private fun buildListenerHealthStatus(
         lastConnectedAt = formatOptionalDateTime(runtimeState.lastConnectedTime),
         lastDisconnectedAt = formatOptionalDateTime(runtimeState.lastDisconnectedTime),
         lastHeartbeatAt = formatOptionalDateTime(runtimeState.lastHeartbeatTime),
+        lastProbeSuccessAt = formatOptionalDateTime(probeSnapshot.lastSuccessTime),
+        lastProbeFailAt = formatOptionalDateTime(probeSnapshot.lastFailTime),
         lastNotificationAt = formatOptionalDateTime(runtimeState.lastNotificationTime),
         lastPaymentNotificationAt = formatOptionalDateTime(runtimeState.lastPaymentNotificationTime),
         lastNotificationPackage = runtimeState.lastNotificationPackage.ifBlank { "暂无" },
@@ -4817,17 +5155,27 @@ private fun buildListenerHealthStatus(
 
 private fun listenerStatusLabel(status: ListenerServiceStatus): String = when (status) {
     ListenerServiceStatus.HEALTHY -> "监听正常"
+    ListenerServiceStatus.STALE -> "长时间没有事件，未确认失效"
     ListenerServiceStatus.SUSPICIOUS -> "监听疑似失效"
     ListenerServiceStatus.DISCONNECTED -> "已断开"
     ListenerServiceStatus.PERMISSION_MISSING -> "权限缺失"
+    ListenerServiceStatus.PERMISSION_GRANTED_BUT_NOT_CONNECTED -> "监听权限已授权，但服务未实际连接"
+    ListenerServiceStatus.FOREGROUND_RUNNING_BUT_LISTENER_DEAD -> "前台服务运行中，但监听服务未连接"
+    ListenerServiceStatus.VENDOR_BLOCKED -> "疑似 HarmonyOS 后台策略拦截"
+    ListenerServiceStatus.PROBE_FAILED -> "探测通知失败"
     ListenerServiceStatus.SERVICE_UNKNOWN -> "未知"
 }
 
 private fun listenerStatusColor(status: ListenerServiceStatus): Color = when (status) {
     ListenerServiceStatus.HEALTHY -> Green
+    ListenerServiceStatus.STALE -> Orange
     ListenerServiceStatus.SUSPICIOUS -> Orange
     ListenerServiceStatus.DISCONNECTED -> Red
     ListenerServiceStatus.PERMISSION_MISSING -> Red
+    ListenerServiceStatus.PERMISSION_GRANTED_BUT_NOT_CONNECTED -> Red
+    ListenerServiceStatus.FOREGROUND_RUNNING_BUT_LISTENER_DEAD -> Red
+    ListenerServiceStatus.VENDOR_BLOCKED -> Red
+    ListenerServiceStatus.PROBE_FAILED -> Red
     ListenerServiceStatus.SERVICE_UNKNOWN -> Orange
 }
 
@@ -4999,6 +5347,61 @@ private suspend fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? =
 private fun isNotificationListenerEnabled(context: Context): Boolean =
     NotificationListenerState.isPermissionEnabled(context)
 
+private fun buildProblemLogText(
+    context: Context,
+    logs: List<BackgroundStabilityLog>,
+    nowMillis: Long = System.currentTimeMillis()
+): String {
+    val appContext = context.applicationContext
+    val since = nowMillis - 24L * 60L * 60L * 1000L
+    val deviceCompatInfo = DeviceCompatInfo.current()
+    val listenerPermission = NotificationListenerState.isPermissionEnabled(appContext)
+    val runtimeState = NotificationListenerState.current(appContext)
+    val autoEnabled = KeepAliveNotificationService.isEnabled(appContext)
+    val foregroundRunning = KeepAliveNotificationService.isRunning(appContext)
+    val probeSnapshot = com.localbookkeeping.app.notification.ListenerProbeNotification.snapshot(appContext)
+    val recoverySnapshot = ListenerRecoveryState.snapshot(appContext)
+    val healthEvaluation = ListenerHealthEvaluator.evaluate(
+        ListenerHealthInput(
+            notificationPermissionEnabled = listenerPermission,
+            listenerConnected = runtimeState.listenerConnected,
+            rawListenerConnected = runtimeState.rawListenerConnected,
+            lastDisconnectedAt = runtimeState.lastDisconnectedTime,
+            lastHeartbeatAt = runtimeState.lastHeartbeatTime,
+            autoListenEnabled = autoEnabled,
+            foregroundServiceRunning = foregroundRunning,
+            testNotificationFailed = probeSnapshot.latestProbeFailed,
+            isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice,
+            nowMillis = nowMillis
+        )
+    )
+    val diagnosticsReport = BackgroundDiagnosticsCalculator.calculate(
+        logs = logs,
+        sinceMillis = since,
+        deviceCompatInfo = deviceCompatInfo,
+        listenerRuntimeState = runtimeState,
+        probeSnapshot = probeSnapshot,
+        recoverySnapshot = recoverySnapshot
+    )
+    return ProblemLogExporter.generate(
+        ProblemLogSnapshot(
+            appVersionName = BuildConfig.VERSION_NAME,
+            versionCode = BuildConfig.VERSION_CODE.toLong(),
+            buildTime = BuildConfig.BUILD_TIME,
+            exportTimeMillis = nowMillis,
+            deviceCompatInfo = deviceCompatInfo,
+            notificationPermissionEnabled = listenerPermission,
+            autoListenEnabled = autoEnabled,
+            foregroundServiceRunning = foregroundRunning,
+            runtimeState = runtimeState,
+            healthEvaluation = healthEvaluation,
+            recoverySnapshot = recoverySnapshot,
+            probeSnapshot = probeSnapshot,
+            diagnosticsReport = diagnosticsReport
+        )
+    )
+}
+
 private enum class MainTab {
     BOOKKEEPING,
     STATS,
@@ -5031,6 +5434,13 @@ private enum class AppScreen {
 
 private data class ListenerHealthStatus(
     val listenerServiceActive: Boolean,
+    val deviceName: String,
+    val systemLabel: String,
+    val compatibilityModeLabel: String,
+    val detectedRomType: String,
+    val isHuaweiHonorDevice: Boolean,
+    val vendorCompatSuggestion: String,
+    val vendorBlocked: Boolean,
     val notificationListenerPermission: String,
     val listenerServiceStatus: String,
     val listenerServiceReasons: String,
@@ -5043,6 +5453,8 @@ private data class ListenerHealthStatus(
     val lastConnectedAt: String,
     val lastDisconnectedAt: String,
     val lastHeartbeatAt: String,
+    val lastProbeSuccessAt: String,
+    val lastProbeFailAt: String,
     val lastNotificationAt: String,
     val lastPaymentNotificationAt: String,
     val lastNotificationPackage: String,
@@ -5121,7 +5533,7 @@ private const val WECHAT_PACKAGE = "com.tencent.mm"
 private const val ALIPAY_PACKAGE = "com.eg.android.AlipayGphone"
 private const val NORMAL_TEST_WINDOW_MILLIS = 30_000L
 private const val PAYMENT_TEST_WINDOW_MILLIS = 120_000L
-private const val APP_VERSION_DISPLAY = "V1.1.2"
+private const val APP_VERSION_DISPLAY = "V1.1.3"
 private val NotificationAmountRegex = Regex("""[¥￥]?\s*-?\d+(?:,\d{3})*(?:\.\d{1,2})?\s*(?:元|CNY|RMB)?""")
 private val Green = Color(0xFF1B8F5A)
 private val Red = Color(0xFFD85A50)

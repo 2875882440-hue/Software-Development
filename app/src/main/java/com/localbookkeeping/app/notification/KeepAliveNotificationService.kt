@@ -124,9 +124,14 @@ class KeepAliveNotificationService : Service() {
     private fun buildNotification(status: ListenerServiceStatus = ListenerRecoveryState.snapshot(this).lastHealthStatus.toStatus()): Notification {
         val (title, text) = when (status) {
             ListenerServiceStatus.HEALTHY -> "自动记账监听中" to "用于提高微信/支付宝付款通知监听稳定性"
+            ListenerServiceStatus.STALE -> "监听长时间无心跳，请打开 App 检查" to "监听服务可能仍在运行，但状态需要确认"
             ListenerServiceStatus.SUSPICIOUS -> "监听可能失效，点击修复" to "最近心跳异常，请打开 App 检查监听状态"
             ListenerServiceStatus.DISCONNECTED -> "监听已断开，请打开 App 修复" to "通知监听服务已断开或被系统回收"
             ListenerServiceStatus.PERMISSION_MISSING -> "通知监听权限未开启" to "请打开 App 前往通知监听权限页面"
+            ListenerServiceStatus.PERMISSION_GRANTED_BUT_NOT_CONNECTED -> "监听权限已开，但服务未连接" to "请重新授权通知监听权限"
+            ListenerServiceStatus.FOREGROUND_RUNNING_BUT_LISTENER_DEAD -> "前台服务运行，监听未连接" to "请打开 App 重新探测或重新授权"
+            ListenerServiceStatus.VENDOR_BLOCKED -> "系统可能拦截了通知监听" to "请重新授权通知监听并检查后台运行权限"
+            ListenerServiceStatus.PROBE_FAILED -> "监听探测失败，请打开 App 检查" to "探测通知未被通知监听捕获"
             ListenerServiceStatus.SERVICE_UNKNOWN -> "自动记账监听中" to "正在检查通知监听服务状态"
         }
         return NotificationCompat.Builder(this, NotificationChannels.LISTENER_CHANNEL_ID)

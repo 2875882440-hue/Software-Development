@@ -1,6 +1,24 @@
 package com.localbookkeeping.app.data
 
+import com.localbookkeeping.app.notification.DeviceCompatInfo
+import com.localbookkeeping.app.notification.ListenerProbeSnapshot
+import com.localbookkeeping.app.notification.ListenerRecoverySnapshot
+import com.localbookkeeping.app.notification.NotificationListenerRuntimeState
+
 data class BackgroundDiagnosticsReport(
+    val deviceBrand: String,
+    val manufacturer: String,
+    val model: String,
+    val osVersion: String,
+    val sdkVersion: Int,
+    val detectedRomType: String,
+    val isHuaweiHonorDevice: Boolean,
+    val lastListenerConnectedTime: Long,
+    val lastListenerDisconnectedTime: Long,
+    val lastProbeSuccessTime: Long,
+    val lastProbeFailTime: Long,
+    val lastVendorCompatCheckTime: Long,
+    val vendorCompatSuggestion: String,
     val appStartCount: Int,
     val listenerConnectedCount: Int,
     val listenerDisconnectedCount: Int,
@@ -29,13 +47,33 @@ data class BackgroundDiagnosticsReport(
 )
 
 object BackgroundDiagnosticsCalculator {
-    fun calculate(logs: List<BackgroundStabilityLog>, sinceMillis: Long): BackgroundDiagnosticsReport {
+    fun calculate(
+        logs: List<BackgroundStabilityLog>,
+        sinceMillis: Long,
+        deviceCompatInfo: DeviceCompatInfo? = null,
+        listenerRuntimeState: NotificationListenerRuntimeState? = null,
+        probeSnapshot: ListenerProbeSnapshot? = null,
+        recoverySnapshot: ListenerRecoverySnapshot? = null
+    ): BackgroundDiagnosticsReport {
         val recent = logs.filter { it.createdAtMillis >= sinceMillis }
         val failures = recent
             .filter { it.eventType == BackgroundEventType.PAYMENT_PARSE_FAIL }
             .groupingBy { it.message.ifBlank { "未知原因" } }
             .eachCount()
         return BackgroundDiagnosticsReport(
+            deviceBrand = deviceCompatInfo?.brand ?: "unknown",
+            manufacturer = deviceCompatInfo?.manufacturer ?: "unknown",
+            model = deviceCompatInfo?.model ?: "unknown",
+            osVersion = deviceCompatInfo?.systemLabel ?: "unknown",
+            sdkVersion = deviceCompatInfo?.sdkVersion ?: 0,
+            detectedRomType = deviceCompatInfo?.detectedRomType ?: "unknown",
+            isHuaweiHonorDevice = deviceCompatInfo?.isHuaweiHonorDevice ?: false,
+            lastListenerConnectedTime = listenerRuntimeState?.lastConnectedTime ?: 0L,
+            lastListenerDisconnectedTime = listenerRuntimeState?.lastDisconnectedTime ?: 0L,
+            lastProbeSuccessTime = probeSnapshot?.lastSuccessTime ?: 0L,
+            lastProbeFailTime = probeSnapshot?.lastFailTime ?: 0L,
+            lastVendorCompatCheckTime = recoverySnapshot?.lastVendorCompatCheckAt ?: 0L,
+            vendorCompatSuggestion = deviceCompatInfo?.vendorCompatSuggestion ?: "unknown",
             appStartCount = recent.count { it.eventType == BackgroundEventType.APP_START },
             listenerConnectedCount = recent.count { it.eventType == BackgroundEventType.LISTENER_CONNECTED },
             listenerDisconnectedCount = recent.count { it.eventType == BackgroundEventType.LISTENER_DISCONNECTED },

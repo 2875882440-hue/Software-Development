@@ -11,7 +11,8 @@ data class ListenerRecoverySnapshot(
     val lastRebindResult: String,
     val lastFailureReason: String,
     val needsListenerRecheck: Boolean,
-    val lastPackageReplacedAt: Long
+    val lastPackageReplacedAt: Long,
+    val lastVendorCompatCheckAt: Long
 )
 
 object ListenerRecoveryState {
@@ -25,6 +26,7 @@ object ListenerRecoveryState {
     private const val KEY_LAST_FAILURE_REASON = "last_failure_reason"
     private const val KEY_NEEDS_LISTENER_RECHECK = "needs_listener_recheck"
     private const val KEY_LAST_PACKAGE_REPLACED_AT = "last_package_replaced_at"
+    private const val KEY_LAST_VENDOR_COMPAT_CHECK_AT = "last_vendor_compat_check_at"
 
     fun snapshot(context: Context): ListenerRecoverySnapshot {
         val prefs = prefs(context)
@@ -37,7 +39,8 @@ object ListenerRecoveryState {
             lastRebindResult = prefs.getString(KEY_LAST_REBIND_RESULT, "").orEmpty(),
             lastFailureReason = prefs.getString(KEY_LAST_FAILURE_REASON, "").orEmpty(),
             needsListenerRecheck = prefs.getBoolean(KEY_NEEDS_LISTENER_RECHECK, false),
-            lastPackageReplacedAt = prefs.getLong(KEY_LAST_PACKAGE_REPLACED_AT, 0L)
+            lastPackageReplacedAt = prefs.getLong(KEY_LAST_PACKAGE_REPLACED_AT, 0L),
+            lastVendorCompatCheckAt = prefs.getLong(KEY_LAST_VENDOR_COMPAT_CHECK_AT, 0L)
         )
     }
 
@@ -75,6 +78,13 @@ object ListenerRecoveryState {
     fun clearListenerRecheckNeeded(context: Context) {
         prefs(context).edit()
             .putBoolean(KEY_NEEDS_LISTENER_RECHECK, false)
+            .apply()
+    }
+
+    fun markVendorCompatCheck(context: Context, checkedAtMillis: Long, suggestion: String) {
+        prefs(context).edit()
+            .putLong(KEY_LAST_VENDOR_COMPAT_CHECK_AT, checkedAtMillis)
+            .putString(KEY_LAST_FAILURE_REASON, suggestion)
             .apply()
     }
 
