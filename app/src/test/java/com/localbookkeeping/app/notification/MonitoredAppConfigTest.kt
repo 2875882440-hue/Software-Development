@@ -1,5 +1,6 @@
 package com.localbookkeeping.app.notification
 
+import android.content.pm.ApplicationInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -45,5 +46,17 @@ class MonitoredAppConfigTest {
         assertTrue(MonitoredAppConfig.isRecommendedApp("com.example.bank", "中国建设银行"))
         assertTrue(MonitoredAppConfig.isRecommendedApp("com.example.cmb", "招商银行"))
         assertFalse(MonitoredAppConfig.isRecommendedApp("com.example.notes", "备忘录"))
+    }
+
+    @Test
+    fun filtersOutSystemAndUpdatedSystemApps() {
+        assertTrue(MonitoredAppConfig.isUserInstalledAppFlags(0))
+        assertFalse(MonitoredAppConfig.isUserInstalledAppFlags(ApplicationInfo.FLAG_SYSTEM))
+        assertFalse(MonitoredAppConfig.isUserInstalledAppFlags(ApplicationInfo.FLAG_UPDATED_SYSTEM_APP))
+        assertFalse(
+            MonitoredAppConfig.isUserInstalledAppFlags(
+                ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
+            )
+        )
     }
 }

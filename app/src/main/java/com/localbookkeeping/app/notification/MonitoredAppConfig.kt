@@ -1,7 +1,7 @@
 package com.localbookkeeping.app.notification
 
 import android.content.Context
-import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 
@@ -101,24 +101,23 @@ object MonitoredAppConfig {
     fun installedApps(context: Context): List<MonitoredAppInfo> {
         val appContext = context.applicationContext
         val packageManager = appContext.packageManager
-        val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packageManager.queryIntentActivities(
-                launchIntent,
-                PackageManager.ResolveInfoFlags.of(0L)
+        val installedApplications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getInstalledApplications(
+                PackageManager.ApplicationInfoFlags.of(0L)
             )
         } else {
             @Suppress("DEPRECATION")
-            packageManager.queryIntentActivities(launchIntent, 0)
+            packageManager.getInstalledApplications(0)
         }
         val enabled = enabledPackages(appContext)
         val prefs = prefs(appContext)
-        return resolveInfos
+        return installedApplications
             .asSequence()
+            .filter { info -> isUserInstalledApp(info) }
             .mapNotNull { info ->
-                val packageName = info.activityInfo?.packageName ?: return@mapNotNull null
+                val packageName = info.packageName ?: return@mapNotNull null
                 if (packageName == appContext.packageName) return@mapNotNull null
-                val appName = info.loadLabel(packageManager)?.toString()?.trim().orEmpty()
+                val appName = packageManager.getApplicationLabel(info)?.toString()?.trim().orEmpty()
                     .ifBlank { packageName }
                 MonitoredAppInfo(
                     packageName = packageName,
@@ -137,6 +136,15 @@ object MonitoredAppConfig {
             )
             .toList()
     }
+
+    fun isUserInstalledAppFlags(flags: Int): Boolean {
+        val isSystem = flags and ApplicationInfo.FLAG_SYSTEM != 0
+        val isUpdatedSystem = flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0
+        return !isSystem && !isUpdatedSystem
+    }
+
+    private fun isUserInstalledApp(info: ApplicationInfo): Boolean =
+        isUserInstalledAppFlags(info.flags)
 
     fun toggleEnabled(current: Set<String>, packageName: String, enabled: Boolean): Set<String> =
         if (enabled) current + packageName else current - packageName
