@@ -43,6 +43,9 @@ data class BackgroundDiagnosticsReport(
     val paymentCapturedCount: Int,
     val paymentParseSuccessCount: Int,
     val paymentParseFailCount: Int,
+    val recentlyIgnoredPackageName: String = "",
+    val recentGenericPaymentAppPackageName: String = "",
+    val recentGenericPaymentParseResult: String = "",
     val failureReasons: Map<String, Int>
 )
 
@@ -108,6 +111,21 @@ object BackgroundDiagnosticsCalculator {
             paymentCapturedCount = recent.count { it.eventType == BackgroundEventType.PAYMENT_NOTIFICATION_CAPTURED },
             paymentParseSuccessCount = recent.count { it.eventType == BackgroundEventType.PAYMENT_PARSE_SUCCESS },
             paymentParseFailCount = recent.count { it.eventType == BackgroundEventType.PAYMENT_PARSE_FAIL },
+            recentlyIgnoredPackageName = recent
+                .filter { it.eventType == BackgroundEventType.IGNORED_BY_APP_FILTER }
+                .maxByOrNull { it.createdAtMillis }
+                ?.message
+                .orEmpty(),
+            recentGenericPaymentAppPackageName = recent
+                .filter { it.eventType == BackgroundEventType.GENERIC_PAYMENT_PARSE_RESULT }
+                .maxByOrNull { it.createdAtMillis }
+                ?.message
+                .orEmpty(),
+            recentGenericPaymentParseResult = recent
+                .filter { it.eventType == BackgroundEventType.GENERIC_PAYMENT_PARSE_RESULT }
+                .maxByOrNull { it.createdAtMillis }
+                ?.detail
+                .orEmpty(),
             failureReasons = failures
         )
     }

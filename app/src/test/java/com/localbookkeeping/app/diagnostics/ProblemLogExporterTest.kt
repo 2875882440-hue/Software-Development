@@ -39,7 +39,8 @@ class ProblemLogExporterTest {
                 ),
                 recoverySnapshot = recoverySnapshot(),
                 probeSnapshot = ListenerProbeSnapshot(100L, 0L, 900L),
-                diagnosticsReport = diagnosticsReport()
+                diagnosticsReport = diagnosticsReport(),
+                enabledMonitorApps = listOf("微信(com.tencent.mm)", "支付宝(com.eg.android.AlipayGphone)", "云闪付(com.unionpay)")
             )
         )
 
@@ -48,6 +49,10 @@ class ProblemLogExporterTest {
         assertTrue(log.contains("设备型号：HONOR HONOR 30 Pro+"))
         assertTrue(log.contains("疑似厂商系统限制后台监听"))
         assertTrue(log.contains("probe 失败次数：1"))
+        assertTrue(log.contains("enabledMonitorApps：微信(com.tencent.mm)、支付宝(com.eg.android.AlipayGphone)、云闪付(com.unionpay)"))
+        assertTrue(log.contains("最近被忽略的 packageName：com.example.unselected"))
+        assertTrue(log.contains("最近进入解析的非微信/支付宝 APP：com.unionpay"))
+        assertTrue(log.contains("最近通用支付通知解析结果：appName=云闪付,parseStatus=pending_confirm"))
         assertFalse(log.contains("rawText"))
         assertFalse(log.contains("星巴克"))
         assertFalse(log.contains("88.80"))
@@ -127,6 +132,9 @@ class ProblemLogExporterTest {
             paymentCapturedCount = 0,
             paymentParseSuccessCount = 0,
             paymentParseFailCount = 0,
+            recentlyIgnoredPackageName = "com.example.unselected",
+            recentGenericPaymentAppPackageName = "com.unionpay",
+            recentGenericPaymentParseResult = "appName=云闪付,parseStatus=pending_confirm",
             failureReasons = emptyMap()
         )
 }

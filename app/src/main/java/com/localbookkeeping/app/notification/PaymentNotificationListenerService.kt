@@ -100,8 +100,12 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             Log.i(TAG, "probe notification captured token=$probeToken")
             return
         }
-        val isFromPaymentApp = isPaymentApp(sbn.packageName)
-        val isRawPaymentRelated = isPaymentRelated(sbn.packageName, content.rawText)
+        val appName = MonitoredAppConfig.appName(this, sbn.packageName)
+        MonitoredAppConfig.markSeen(this, sbn.packageName, appName)
+        val isMonitoredApp = MonitoredAppConfig.isEnabled(this, sbn.packageName)
+        val isFromPaymentApp = isPaymentApp(sbn.packageName) || isMonitoredApp
+        val isRawPaymentRelated = isPaymentRelated(sbn.packageName, content.rawText) ||
+            (isMonitoredApp && isGenericPaymentRelated(content.rawText))
         val screenLocked = getSystemService(KeyguardManager::class.java)?.isKeyguardLocked == true
         Log.i(
             TAG,
@@ -131,14 +135,47 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                 )
             )
 
+            if (!isMonitoredApp) {
+                repository.addBackgroundStabilityLog(
+                    BackgroundEventType.IGNORED_BY_APP_FILTER,
+                    sbn.packageName,
+                    "appName=$appName"
+                )
+                repository.updateDebugNotificationParseResult(
+                    id = logId,
+                    parseStatus = "IGNORED_BY_APP_FILTER",
+                    failureReason = "未勾选监听应用",
+                    isPaymentNotification = false,
+                    hasAmount = false,
+                    pendingCreated = false,
+                    parseReason = "packageName=${sbn.packageName}; appName=$appName; 监听应用未启用",
+                    isPaymentRelated = false,
+                    isParsed = false,
+                    failReason = "未勾选监听应用"
+                )
+                Log.i(TAG, "ignoredByAppFilter package=${sbn.packageName}, appName=$appName")
+                return@launch
+            }
+
             val parseResult = parser.parse(
                 packageName = sbn.packageName,
                 title = content.title,
                 text = content.rawText,
-                postTimeMillis = sbn.postTime
+                postTimeMillis = sbn.postTime,
+                allowGenericPaymentApps = !isPaymentApp(sbn.packageName),
+                genericSourceApp = appName
             )
+            if (!isPaymentApp(sbn.packageName)) {
+                repository.addBackgroundStabilityLog(
+                    BackgroundEventType.GENERIC_PAYMENT_PARSE_RESULT,
+                    sbn.packageName,
+                    "appName=$appName,parseStatus=${parseResult.parseStatus},isPayment=${parseResult.isPaymentNotification},hasAmount=${parseResult.hasAmount}"
+                )
+            }
             val parsed = parseResult.bill
             if (parsed == null) {
+                val enrichedParseReason =
+                    "packageName=${sbn.packageName}; appName=$appName; enabled=$isMonitoredApp; sourceApp=${appName}; parseResult=${parseResult.parseStatus}; ${parseResult.parseReason}"
                 if (isFromPaymentApp || isRawPaymentRelated) {
                     repository.addBackgroundStabilityLog(
                         BackgroundEventType.PAYMENT_PARSE_FAIL,
@@ -153,7 +190,7 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     isPaymentNotification = parseResult.isPaymentNotification,
                     hasAmount = parseResult.hasAmount,
                     pendingCreated = false,
-                    parseReason = parseResult.parseReason,
+                    parseReason = enrichedParseReason,
                     isPaymentRelated = isRawPaymentRelated || parseResult.isPaymentNotification,
                     isParsed = false,
                     failReason = parseResult.failureReason,
@@ -200,7 +237,7 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     isPaymentNotification = parsed.isPaymentNotification,
                     hasAmount = parsed.hasAmount,
                     pendingCreated = true,
-                    parseReason = parsed.parseReason,
+                    parseReason = "packageName=${sbn.packageName}; appName=$appName; enabled=$isMonitoredApp; sourceApp=${parsed.sourceApp}; parseResult=${parsed.parseStatus}; ${parsed.parseReason}",
                     ruleMatched = insertResult.ruleMatched,
                     matchedRuleName = insertResult.matchedRuleName,
                     confidence = insertResult.confidence,
@@ -226,7 +263,7 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     isPaymentNotification = parsed.isPaymentNotification,
                     hasAmount = parsed.hasAmount,
                     pendingCreated = false,
-                    parseReason = duplicateReason,
+                    parseReason = "packageName=${sbn.packageName}; appName=$appName; enabled=$isMonitoredApp; sourceApp=${parsed.sourceApp}; parseResult=duplicate; $duplicateReason",
                     ruleMatched = insertResult.ruleMatched,
                     matchedRuleName = insertResult.matchedRuleName,
                     confidence = insertResult.confidence,
@@ -349,6 +386,9 @@ class PaymentNotificationListenerService : NotificationListenerService() {
 
         fun isPaymentRelated(packageName: String, rawText: String): Boolean =
             isPaymentApp(packageName) && paymentKeywords.any { rawText.contains(it) }
+
+        fun isGenericPaymentRelated(rawText: String): Boolean =
+            paymentKeywords.any { rawText.contains(it) }
     }
 }
 

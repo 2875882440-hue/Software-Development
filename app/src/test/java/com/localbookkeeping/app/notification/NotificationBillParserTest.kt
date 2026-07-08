@@ -54,6 +54,24 @@ class NotificationBillParserTest {
     }
 
     @Test
+    fun parsesGenericPaymentAppWhenExplicitlyAllowed() {
+        val result = parser.parse(
+            packageName = "com.unionpay",
+            title = "云闪付",
+            text = "支付成功 37元",
+            allowGenericPaymentApps = true,
+            genericSourceApp = "云闪付"
+        )
+
+        val bill = result.bill
+        assertNotNull(bill)
+        assertEquals(3700L, bill!!.amountCents)
+        assertEquals(TransactionType.EXPENSE, bill.type)
+        assertEquals("云闪付", bill.sourceApp)
+        assertEquals(RecordStatus.PENDING_CONFIRM, bill.status)
+    }
+
+    @Test
     fun parsesChineseYuanSymbolAmount() {
         val result = parser.parse(
             packageName = "com.tencent.mm",

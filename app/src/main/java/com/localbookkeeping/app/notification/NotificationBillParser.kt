@@ -58,8 +58,19 @@ data class NotificationParseResult(
 )
 
 class NotificationBillParser {
-    fun parse(packageName: String, title: String, text: String, postTimeMillis: Long = 0L): NotificationParseResult {
-        val sourceApp = sourceName(packageName)
+    fun parse(
+        packageName: String,
+        title: String,
+        text: String,
+        postTimeMillis: Long = 0L,
+        allowGenericPaymentApps: Boolean = false,
+        genericSourceApp: String = ""
+    ): NotificationParseResult {
+        val sourceApp = sourceName(packageName) ?: if (allowGenericPaymentApps) {
+            genericSourceApp.ifBlank { packageName }
+        } else {
+            null
+        }
         val notificationTitle = title.trim()
         val notificationText = text.trim()
         val normalized = normalize(listOf(notificationTitle, notificationText))

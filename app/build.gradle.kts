@@ -15,8 +15,8 @@ android {
         applicationId = "com.localbookkeeping.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 113
-        versionName = "1.1.3"
+        versionCode = 114
+        versionName = "1.1.4"
         buildConfigField("String", "BUILD_TIME", "\"${Instant.now()}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

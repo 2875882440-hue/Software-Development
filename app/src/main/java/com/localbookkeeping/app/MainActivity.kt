@@ -48,6 +48,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
@@ -87,6 +88,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.graphics.drawable.toBitmap
 import com.localbookkeeping.app.backup.LocalBackupManager
 import com.localbookkeeping.app.diagnostics.ProblemLogExporter
 import com.localbookkeeping.app.diagnostics.ProblemLogSnapshot
@@ -116,6 +118,8 @@ import com.localbookkeeping.app.notification.ListenerRecoveryManager
 import com.localbookkeeping.app.notification.ListenerRecoveryState
 import com.localbookkeeping.app.notification.RebindAttemptStatus
 import com.localbookkeeping.app.notification.ListenerServiceStatus
+import com.localbookkeeping.app.notification.MonitoredAppConfig
+import com.localbookkeeping.app.notification.MonitoredAppInfo
 import com.localbookkeeping.app.notification.NotificationBillParser
 import com.localbookkeeping.app.notification.NotificationChannels
 import com.localbookkeeping.app.notification.NotificationListenerState
@@ -850,6 +854,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                     },
                     onOpenBackgroundSettings = { screen = AppScreen.BACKGROUND_SETTINGS },
                     onOpenBackgroundReport = { screen = AppScreen.BACKGROUND_REPORT },
+                    onOpenMonitoredApps = { screen = AppScreen.MONITORED_APPS },
                     onEnableAutoListen = { showAutoListenConfirmDialog = true },
                     onDisableAutoListen = {
                         KeepAliveNotificationService.stop(context)
@@ -1162,6 +1167,11 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                     onShareProblemLog = ::shareProblemLog
                 )
 
+                AppScreen.MONITORED_APPS -> MonitoredAppsScreen(
+                    onBack = ::navigateBack,
+                    onChanged = { healthRefreshTick = System.currentTimeMillis() }
+                )
+
                 AppScreen.TROUBLESHOOTING -> PaymentTroubleshootingScreen(
                     health = buildListenerHealthStatus(context, uiState.debugNotificationLogs, healthRefreshTick),
                     onBack = ::navigateBack,
@@ -1407,6 +1417,7 @@ private fun MainTabsScreen(
     onOpenStats: () -> Unit,
     onOpenBackgroundSettings: () -> Unit,
     onOpenBackgroundReport: () -> Unit,
+    onOpenMonitoredApps: () -> Unit,
     onEnableAutoListen: () -> Unit,
     onDisableAutoListen: () -> Unit,
     onRestoreAutoListen: () -> Unit,
@@ -1514,6 +1525,7 @@ private fun MainTabsScreen(
                 onOpenHealth = onOpenHealth,
                 onOpenBackgroundSettings = onOpenBackgroundSettings,
                 onOpenBackgroundReport = onOpenBackgroundReport,
+                onOpenMonitoredApps = onOpenMonitoredApps,
                 onEnableAutoListen = onEnableAutoListen,
                 onDisableAutoListen = onDisableAutoListen,
                 onRestoreAutoListen = onRestoreAutoListen,
@@ -1926,6 +1938,7 @@ private fun ListenerTabContent(
     onOpenHealth: () -> Unit,
     onOpenBackgroundSettings: () -> Unit,
     onOpenBackgroundReport: () -> Unit,
+    onOpenMonitoredApps: () -> Unit,
     onEnableAutoListen: () -> Unit,
     onDisableAutoListen: () -> Unit,
     onRestoreAutoListen: () -> Unit,
@@ -1989,6 +2002,9 @@ private fun ListenerTabContent(
                     }
                     OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenBackgroundReport) {
                         Text("后台诊断报告")
+                    }
+                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenMonitoredApps) {
+                        Text("管理监听应用")
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = onOpenDebugLogs) { Text("通知日志") }
@@ -2145,6 +2161,8 @@ private fun ListenerStatusCard(
             HealthStatusRow("当前设备", deviceCompatInfo.deviceName)
             HealthStatusRow("系统", deviceCompatInfo.systemLabel)
             HealthStatusRow("兼容模式", deviceCompatInfo.compatibilityModeLabel)
+            HealthStatusRow("已启用监听应用", "${MonitoredAppConfig.enabledCount(context)} 个")
+            HealthStatusRow("监听应用摘要", MonitoredAppConfig.enabledSummary(context))
             HealthStatusRow("通知监听权限", if (notificationAccessEnabled) "已授权" else "未授权")
             HealthStatusRow("监听状态", listenerStatusLabel(health.status))
             HealthStatusRow("自动监听", if (autoEnabled) "已启用" else "未启用")
@@ -3448,6 +3466,138 @@ private fun BackgroundSettingsScreen(
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun MonitoredAppsScreen(
+    onBack: () -> Unit,
+    onChanged: () -> Unit
+) {
+    val context = LocalContext.current
+    var apps by remember { mutableStateOf(MonitoredAppConfig.installedApps(context)) }
+    val recommendedApps = apps.filter { it.recommended }
+    val otherApps = apps.filterNot { it.recommended }
+
+    fun setEnabled(app: MonitoredAppInfo, enabled: Boolean) {
+        MonitoredAppConfig.setEnabled(
+            context = context,
+            packageName = app.packageName,
+            appName = app.appName,
+            enabled = enabled
+        )
+        apps = MonitoredAppConfig.installedApps(context)
+        onChanged()
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Spacer(Modifier.height(18.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButtonLike("返回", onBack)
+                Spacer(Modifier.width(12.dp))
+                Text("监听应用管理", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            }
+            Text("选择哪些 APP 的通知参与自动记账识别。微信和支付宝默认启用。", color = MutedText, fontSize = 13.sp)
+        }
+        item {
+            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("当前已启用", color = PrimaryText, fontWeight = FontWeight.Bold)
+                    HealthStatusRow("启用数量", "${apps.count { it.enabled }} 个")
+                    HealthStatusRow(
+                        "应用摘要",
+                        apps.filter { it.enabled }.take(5).joinToString("、") { it.appName }.ifBlank { "暂无" }
+                    )
+                }
+            }
+        }
+        item {
+            Text("推荐支付应用", color = PrimaryText, fontWeight = FontWeight.Bold)
+        }
+        if (recommendedApps.isEmpty()) {
+            item {
+                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Text("未发现推荐支付应用", modifier = Modifier.fillMaxWidth().padding(14.dp), color = MutedText)
+                }
+            }
+        } else {
+            items(recommendedApps, key = { "recommended-${it.packageName}" }) { app ->
+                MonitoredAppRow(app = app, onEnabledChange = { setEnabled(app, it) })
+            }
+        }
+        item {
+            Text("全部应用", color = PrimaryText, fontWeight = FontWeight.Bold)
+        }
+        if (otherApps.isEmpty()) {
+            item {
+                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Text("暂无可选择应用", modifier = Modifier.fillMaxWidth().padding(14.dp), color = MutedText)
+                }
+            }
+        } else {
+            items(otherApps, key = { "all-${it.packageName}" }) { app ->
+                MonitoredAppRow(app = app, onEnabledChange = { setEnabled(app, it) })
+            }
+        }
+        item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun MonitoredAppRow(
+    app: MonitoredAppInfo,
+    onEnabledChange: (Boolean) -> Unit
+) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            AppIcon(packageName = app.packageName, appName = app.appName)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(app.appName, color = PrimaryText, fontWeight = FontWeight.SemiBold)
+                Text(app.packageName, color = MutedText, fontSize = 12.sp)
+                if (app.recommended) {
+                    Text("推荐支付应用", color = Green, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Checkbox(checked = app.enabled, onCheckedChange = onEnabledChange)
+        }
+    }
+}
+
+@Composable
+private fun AppIcon(packageName: String, appName: String) {
+    val context = LocalContext.current
+    val image = remember(packageName) {
+        runCatching {
+            context.packageManager
+                .getApplicationIcon(packageName)
+                .toBitmap(width = 48, height = 48)
+                .asImageBitmap()
+        }.getOrNull()
+    }
+    if (image != null) {
+        Image(
+            bitmap = image,
+            contentDescription = appName,
+            modifier = Modifier.size(42.dp).clip(RoundedCornerShape(8.dp))
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .background(PageBackground),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(appName.take(1).ifBlank { "?" }, color = MutedText, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -5397,7 +5547,8 @@ private fun buildProblemLogText(
             healthEvaluation = healthEvaluation,
             recoverySnapshot = recoverySnapshot,
             probeSnapshot = probeSnapshot,
-            diagnosticsReport = diagnosticsReport
+            diagnosticsReport = diagnosticsReport,
+            enabledMonitorApps = MonitoredAppConfig.enabledSummaryForLog(appContext)
         )
     )
 }
@@ -5425,6 +5576,7 @@ private enum class AppScreen {
     HEALTH,
     BACKGROUND_SETTINGS,
     BACKGROUND_REPORT,
+    MONITORED_APPS,
     TROUBLESHOOTING,
     QUICK_BACKFILL,
     RULES,
@@ -5533,7 +5685,7 @@ private const val WECHAT_PACKAGE = "com.tencent.mm"
 private const val ALIPAY_PACKAGE = "com.eg.android.AlipayGphone"
 private const val NORMAL_TEST_WINDOW_MILLIS = 30_000L
 private const val PAYMENT_TEST_WINDOW_MILLIS = 120_000L
-private const val APP_VERSION_DISPLAY = "V1.1.3"
+private const val APP_VERSION_DISPLAY = "V1.1.4"
 private val NotificationAmountRegex = Regex("""[¥￥]?\s*-?\d+(?:,\d{3})*(?:\.\d{1,2})?\s*(?:元|CNY|RMB)?""")
 private val Green = Color(0xFF1B8F5A)
 private val Red = Color(0xFFD85A50)

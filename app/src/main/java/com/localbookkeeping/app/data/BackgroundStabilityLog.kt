@@ -39,6 +39,8 @@ object BackgroundEventType {
     const val PAYMENT_NOTIFICATION_CAPTURED = "paymentNotificationCaptured"
     const val PAYMENT_PARSE_SUCCESS = "paymentParseSuccess"
     const val PAYMENT_PARSE_FAIL = "paymentParseFail"
+    const val IGNORED_BY_APP_FILTER = "ignoredByAppFilter"
+    const val GENERIC_PAYMENT_PARSE_RESULT = "genericPaymentParseResult"
     const val AUTO_LISTEN_ENABLED = "autoListenEnabled"
     const val AUTO_LISTEN_DISABLED = "autoListenDisabled"
     const val PROBE_NOTIFICATION_SENT = "probeNotificationSent"

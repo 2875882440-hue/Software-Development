@@ -24,7 +24,8 @@ data class ProblemLogSnapshot(
     val healthEvaluation: ListenerHealthEvaluation,
     val recoverySnapshot: ListenerRecoverySnapshot,
     val probeSnapshot: ListenerProbeSnapshot,
-    val diagnosticsReport: BackgroundDiagnosticsReport
+    val diagnosticsReport: BackgroundDiagnosticsReport,
+    val enabledMonitorApps: List<String> = emptyList()
 )
 
 object ProblemLogExporter {
@@ -67,6 +68,7 @@ object ProblemLogExporter {
             appendLine("最近健康检查：${formatTime(snapshot.recoverySnapshot.lastHealthCheckAt)}")
             appendLine("最近 requestRebind 结果：${snapshot.recoverySnapshot.lastRebindResult.ifBlank { "暂无" }}")
             appendLine("最近失败原因：${snapshot.recoverySnapshot.lastFailureReason.ifBlank { "暂无" }}")
+            appendLine("enabledMonitorApps：${snapshot.enabledMonitorApps.joinToString("、").ifBlank { "暂无" }}")
             appendLine()
             appendLine("【最近记录】")
             appendLine("最近通知时间：${formatTime(snapshot.runtimeState.lastNotificationTime)}")
@@ -75,6 +77,9 @@ object ProblemLogExporter {
             appendLine("最近付款通知：${formatTime(snapshot.runtimeState.lastPaymentNotificationTime)}")
             appendLine("最近 probe 成功：${formatTime(snapshot.probeSnapshot.lastSuccessTime)}")
             appendLine("最近 probe 失败：${formatTime(snapshot.probeSnapshot.lastFailTime)}")
+            appendLine("最近被忽略的 packageName：${snapshot.diagnosticsReport.recentlyIgnoredPackageName.ifBlank { "暂无" }}")
+            appendLine("最近进入解析的非微信/支付宝 APP：${snapshot.diagnosticsReport.recentGenericPaymentAppPackageName.ifBlank { "暂无" }}")
+            appendLine("最近通用支付通知解析结果：${snapshot.diagnosticsReport.recentGenericPaymentParseResult.ifBlank { "暂无" }}")
             appendLine()
             appendLine("【后台诊断统计】")
             appendLine("最近24小时健康检查次数：${snapshot.diagnosticsReport.healthCheckCount}")
