@@ -1,5 +1,9 @@
 package com.localbookkeeping.app.diagnostics
 
+import com.localbookkeeping.app.analytics.AutoBookkeepingCounters
+import com.localbookkeeping.app.analytics.AutoBookkeepingSource
+import com.localbookkeeping.app.analytics.AutoBookkeepingSourceSummary
+import com.localbookkeeping.app.analytics.AutoBookkeepingStatsSnapshot
 import com.localbookkeeping.app.data.BackgroundDiagnosticsReport
 import com.localbookkeeping.app.notification.DeviceCompatInfo
 import com.localbookkeeping.app.notification.ListenerHealthEvaluation
@@ -10,6 +14,7 @@ import com.localbookkeeping.app.notification.NotificationListenerRuntimeState
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 
 class ProblemLogExporterTest {
     @Test
@@ -40,7 +45,28 @@ class ProblemLogExporterTest {
                 recoverySnapshot = recoverySnapshot(),
                 probeSnapshot = ListenerProbeSnapshot(100L, 0L, 900L),
                 diagnosticsReport = diagnosticsReport(),
-                enabledMonitorApps = listOf("微信(com.tencent.mm)", "支付宝(com.eg.android.AlipayGphone)", "云闪付(com.unionpay)")
+                enabledMonitorApps = listOf("微信(com.tencent.mm)", "支付宝(com.eg.android.AlipayGphone)", "云闪付(com.unionpay)"),
+                autoBookkeepingStats = AutoBookkeepingStatsSnapshot(
+                    windowDays = 14,
+                    fromDate = LocalDate.of(2026, 7, 3),
+                    toDate = LocalDate.of(2026, 7, 16),
+                    total = AutoBookkeepingCounters(
+                        notificationReceived = 12,
+                        paymentRelated = 10,
+                        pendingCreated = 9,
+                        amountParseFailed = 1,
+                        userConfirmed = 8,
+                        userAmountEdited = 1,
+                        userDeleted = 0,
+                        duplicateFiltered = 1
+                    ),
+                    bySource = listOf(
+                        AutoBookkeepingSourceSummary(
+                            AutoBookkeepingSource.WECHAT,
+                            AutoBookkeepingCounters(paymentRelated = 6, pendingCreated = 5)
+                        )
+                    )
+                )
             )
         )
 
@@ -53,7 +79,11 @@ class ProblemLogExporterTest {
         assertTrue(log.contains("最近被忽略的 packageName：com.example.unselected"))
         assertTrue(log.contains("最近进入解析的非微信/支付宝 APP：com.unionpay"))
         assertTrue(log.contains("最近通用支付通知解析结果：appName=云闪付,parseStatus=pending_confirm"))
+        assertTrue(log.contains("【匿名自动记账统计】"))
+        assertTrue(log.contains("生成成功率：90%"))
+        assertTrue(log.contains("微信：支付相关=6，生成账单=5，成功率=83%"))
         assertFalse(log.contains("rawText"))
+        assertFalse(log.contains("v1|2026-07-16"))
         assertFalse(log.contains("星巴克"))
         assertFalse(log.contains("88.80"))
         assertFalse(log.contains("午饭备注"))

@@ -7,6 +7,8 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.localbookkeeping.app.AppVisibilityTracker
+import com.localbookkeeping.app.analytics.AutoBookkeepingEvent
+import com.localbookkeeping.app.analytics.AutoBookkeepingStatsStore
 import com.localbookkeeping.app.data.AppDatabase
 import com.localbookkeeping.app.data.BackgroundEventType
 import com.localbookkeeping.app.data.BookkeepingRepository
@@ -34,6 +36,7 @@ class PaymentNotificationListenerService : NotificationListenerService() {
             merchantCategoryLearningDao = database.merchantCategoryLearningDao()
         )
     }
+    private val autoBookkeepingStats by lazy { AutoBookkeepingStatsStore.create(this) }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -157,6 +160,10 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                 return@launch
             }
 
+            autoBookkeepingStats.record(
+                AutoBookkeepingEvent.NOTIFICATION_RECEIVED,
+                sbn.packageName
+            )
             val parseResult = parser.parse(
                 packageName = sbn.packageName,
                 title = content.title,
@@ -165,6 +172,19 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                 allowGenericPaymentApps = !isPaymentApp(sbn.packageName),
                 genericSourceApp = appName
             )
+            val isParsedPaymentRelated = isRawPaymentRelated || parseResult.isPaymentNotification
+            if (isParsedPaymentRelated) {
+                autoBookkeepingStats.record(
+                    AutoBookkeepingEvent.PAYMENT_RELATED,
+                    sbn.packageName
+                )
+            }
+            if (parseResult.isPaymentNotification && !parseResult.hasAmount) {
+                autoBookkeepingStats.record(
+                    AutoBookkeepingEvent.AMOUNT_PARSE_FAILED,
+                    sbn.packageName
+                )
+            }
             if (!isPaymentApp(sbn.packageName)) {
                 repository.addBackgroundStabilityLog(
                     BackgroundEventType.GENERIC_PAYMENT_PARSE_RESULT,
@@ -224,6 +244,10 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                 isPaymentNotification = parsed.isPaymentNotification
             )
             if (insertResult.inserted) {
+                autoBookkeepingStats.record(
+                    AutoBookkeepingEvent.PENDING_CREATED,
+                    sbn.packageName
+                )
                 NotificationListenerState.markPaymentParsed(this@PaymentNotificationListenerService, sbn.packageName)
                 repository.addBackgroundStabilityLog(
                     BackgroundEventType.PAYMENT_PARSE_SUCCESS,
@@ -250,6 +274,10 @@ class PaymentNotificationListenerService : NotificationListenerService() {
                     selectedReason = parseResult.diagnostics.selectedReasonText()
                 )
             } else {
+                autoBookkeepingStats.record(
+                    AutoBookkeepingEvent.DUPLICATE_FILTERED,
+                    sbn.packageName
+                )
                 val duplicateReason = insertResult.duplicateReason.ifBlank { "被判定为重复通知" }
                 repository.addBackgroundStabilityLog(
                     BackgroundEventType.PAYMENT_PARSE_FAIL,

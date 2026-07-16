@@ -1,5 +1,6 @@
 package com.localbookkeeping.app.diagnostics
 
+import com.localbookkeeping.app.analytics.AutoBookkeepingStatsSnapshot
 import com.localbookkeeping.app.data.BackgroundDiagnosticsReport
 import com.localbookkeeping.app.notification.DeviceCompatInfo
 import com.localbookkeeping.app.notification.ListenerHealthEvaluation
@@ -25,7 +26,8 @@ data class ProblemLogSnapshot(
     val recoverySnapshot: ListenerRecoverySnapshot,
     val probeSnapshot: ListenerProbeSnapshot,
     val diagnosticsReport: BackgroundDiagnosticsReport,
-    val enabledMonitorApps: List<String> = emptyList()
+    val enabledMonitorApps: List<String> = emptyList(),
+    val autoBookkeepingStats: AutoBookkeepingStatsSnapshot? = null
 )
 
 object ProblemLogExporter {
@@ -89,6 +91,25 @@ object ProblemLogExporter {
             appendLine("监听断开次数：${snapshot.diagnosticsReport.listenerDisconnectedCount}")
             appendLine("前台服务启动次数：${snapshot.diagnosticsReport.foregroundServiceStartCount}")
             appendLine("前台服务停止次数：${snapshot.diagnosticsReport.foregroundServiceStopCount}")
+            snapshot.autoBookkeepingStats?.let { stats ->
+                appendLine()
+                appendLine("【匿名自动记账统计】")
+                appendLine("统计窗口：最近${stats.windowDays}天")
+                appendLine("收到监听通知：${stats.total.notificationReceived}")
+                appendLine("支付相关通知：${stats.total.paymentRelated}")
+                appendLine("自动生成账单：${stats.total.pendingCreated}")
+                appendLine("金额解析失败：${stats.total.amountParseFailed}")
+                appendLine("重复通知过滤：${stats.total.duplicateFiltered}")
+                appendLine("用户确认：${stats.total.userConfirmed}")
+                appendLine("用户修改金额：${stats.total.userAmountEdited}")
+                appendLine("用户删除：${stats.total.userDeleted}")
+                appendLine("生成成功率：${rateLabel(stats.total.generationSuccessRatePercent)}")
+                stats.bySource.forEach { source ->
+                    appendLine(
+                        "${source.source.displayName}：支付相关=${source.counters.paymentRelated}，生成账单=${source.counters.pendingCreated}，成功率=${rateLabel(source.counters.generationSuccessRatePercent)}"
+                    )
+                }
+            }
             appendLine()
             appendLine("【诊断结论】")
             appendLine(conclusion.joinToString("；"))
@@ -164,6 +185,8 @@ object ProblemLogExporter {
     private fun connectedLabel(connected: Boolean): String = if (connected) "已连接" else "未连接"
 
     private fun yesNo(value: Boolean): String = if (value) "是" else "否"
+
+    private fun rateLabel(value: Int?): String = value?.let { "$it%" } ?: "暂无"
 
     private fun formatTime(millis: Long): String =
         if (millis > 0L) {

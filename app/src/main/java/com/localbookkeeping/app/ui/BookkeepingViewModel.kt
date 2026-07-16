@@ -3,6 +3,9 @@ package com.localbookkeeping.app.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.localbookkeeping.app.analytics.AutoBookkeepingEvent
+import com.localbookkeeping.app.analytics.AutoBookkeepingStatsStore
+import com.localbookkeeping.app.analytics.isAutoNotificationRecordEligible
 import com.localbookkeeping.app.data.BookkeepingRepository
 import com.localbookkeeping.app.data.BackgroundEventType
 import com.localbookkeeping.app.data.BackgroundStabilityLog
@@ -23,7 +26,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class BookkeepingViewModel(
-    private val repository: BookkeepingRepository
+    private val repository: BookkeepingRepository,
+    private val autoBookkeepingStats: AutoBookkeepingStatsStore
 ) : ViewModel() {
     private val parser = NotificationBillParser()
     private val screenshotParser = ScreenshotBillParser()
@@ -85,7 +89,9 @@ class BookkeepingViewModel(
 
     fun confirmPending(id: Long) {
         viewModelScope.launch {
+            val record = recordById(id)
             repository.confirmPending(id)
+            recordNotificationEvent(record, AutoBookkeepingEvent.USER_CONFIRMED)
         }
     }
 
@@ -99,7 +105,12 @@ class BookkeepingViewModel(
         paidAtMillis: Long
     ) {
         viewModelScope.launch {
+            val record = recordById(id)
             repository.updatePendingAndConfirm(id, amountCents, type, category, merchantName, note, paidAtMillis)
+            recordNotificationEvent(record, AutoBookkeepingEvent.USER_CONFIRMED)
+            if (record != null && record.amountCents != amountCents) {
+                recordNotificationEvent(record, AutoBookkeepingEvent.USER_AMOUNT_EDITED)
+            }
         }
     }
 
@@ -150,13 +161,19 @@ class BookkeepingViewModel(
         paidAtMillis: Long
     ) {
         viewModelScope.launch {
+            val record = recordById(id)
             repository.updateConfirmedRecord(id, amountCents, type, category, merchantName, note, paidAtMillis)
+            if (record != null && record.amountCents != amountCents) {
+                recordNotificationEvent(record, AutoBookkeepingEvent.USER_AMOUNT_EDITED)
+            }
         }
     }
 
     fun softDeleteRecord(id: Long) {
         viewModelScope.launch {
+            val record = recordById(id)
             repository.softDeleteRecord(id)
+            recordNotificationEvent(record, AutoBookkeepingEvent.USER_DELETED)
         }
     }
 
@@ -408,6 +425,22 @@ class BookkeepingViewModel(
         listOf(parsed.sourceApp, parsed.merchant.ifBlank { "截图识别" })
             .joinToString("：")
             .take(80)
+
+    private fun recordById(id: Long): ExpenseRecord? =
+        (uiState.value.pendingRecords + uiState.value.confirmedRecords).firstOrNull { it.id == id }
+
+    private fun recordNotificationEvent(record: ExpenseRecord?, event: AutoBookkeepingEvent) {
+        val packageName = record?.notificationPackageName.orEmpty()
+        val isAutomaticallyCreatedFromNotification = record != null &&
+            isAutoNotificationRecordEligible(
+                sourceType = record.sourceType,
+                packageName = packageName,
+                notificationFingerprint = record.notificationFingerprint
+            )
+        if (isAutomaticallyCreatedFromNotification) {
+            autoBookkeepingStats.record(event, packageName)
+        }
+    }
 }
 
 data class BookkeepingUiState(
@@ -423,9 +456,10 @@ data class BookkeepingUiState(
 )
 
 class BookkeepingViewModelFactory(
-    private val repository: BookkeepingRepository
+    private val repository: BookkeepingRepository,
+    private val autoBookkeepingStats: AutoBookkeepingStatsStore
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        BookkeepingViewModel(repository) as T
+        BookkeepingViewModel(repository, autoBookkeepingStats) as T
 }

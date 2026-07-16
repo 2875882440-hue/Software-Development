@@ -1,6 +1,7 @@
 package com.localbookkeeping.app
 
 import android.app.Application
+import com.localbookkeeping.app.analytics.AutoBookkeepingStatsStore
 import com.localbookkeeping.app.data.AppDatabase
 import com.localbookkeeping.app.data.BackgroundEventType
 import com.localbookkeeping.app.data.BookkeepingRepository
@@ -23,6 +24,7 @@ class BookkeepingApplication : Application() {
     }
 
     val database by lazy { AppDatabase.create(this) }
+    val autoBookkeepingStats by lazy { AutoBookkeepingStatsStore.create(this) }
     val repository by lazy {
         BookkeepingRepository(
             expenseDao = database.expenseDao(),

@@ -108,6 +108,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.graphics.drawable.toBitmap
+import com.localbookkeeping.app.analytics.AutoBookkeepingCounters
+import com.localbookkeeping.app.analytics.AutoBookkeepingStatsSnapshot
 import com.localbookkeeping.app.backup.LocalBackupManager
 import com.localbookkeeping.app.diagnostics.ProblemLogExporter
 import com.localbookkeeping.app.diagnostics.ProblemLogSnapshot
@@ -189,7 +191,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
     val viewModel: BookkeepingViewModel = viewModel(
-        factory = BookkeepingViewModelFactory(app.repository)
+        factory = BookkeepingViewModelFactory(app.repository, app.autoBookkeepingStats)
     )
     val uiState by viewModel.uiState.collectAsState()
     val onboardingPreferences = remember {
@@ -889,6 +891,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                     },
                     onOpenBackgroundSettings = { screen = AppScreen.BACKGROUND_SETTINGS },
                     onOpenBackgroundReport = { screen = AppScreen.BACKGROUND_REPORT },
+                    onOpenAutoBookkeepingStats = { screen = AppScreen.AUTO_BOOKKEEPING_STATS },
                     onOpenMonitoredApps = { screen = AppScreen.MONITORED_APPS },
                     onEnableAutoListen = { showAutoListenConfirmDialog = true },
                     onDisableAutoListen = {
@@ -1205,6 +1208,11 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                     onBack = ::navigateBack,
                     onCopyProblemLog = ::copyProblemLog,
                     onShareProblemLog = ::shareProblemLog
+                )
+
+                AppScreen.AUTO_BOOKKEEPING_STATS -> AutoBookkeepingStatsScreen(
+                    snapshot = app.autoBookkeepingStats.snapshot(),
+                    onBack = ::navigateBack
                 )
 
                 AppScreen.MONITORED_APPS -> MonitoredAppsScreen(
@@ -1569,6 +1577,7 @@ private fun MainTabsScreen(
     onOpenStats: () -> Unit,
     onOpenBackgroundSettings: () -> Unit,
     onOpenBackgroundReport: () -> Unit,
+    onOpenAutoBookkeepingStats: () -> Unit,
     onOpenMonitoredApps: () -> Unit,
     onEnableAutoListen: () -> Unit,
     onDisableAutoListen: () -> Unit,
@@ -1655,6 +1664,7 @@ private fun MainTabsScreen(
                 onOpenHealth = onOpenHealth,
                 onOpenBackgroundSettings = onOpenBackgroundSettings,
                 onOpenBackgroundReport = onOpenBackgroundReport,
+                onOpenAutoBookkeepingStats = onOpenAutoBookkeepingStats,
                 onOpenMonitoredApps = onOpenMonitoredApps,
                 onEnableAutoListen = onEnableAutoListen,
                 onDisableAutoListen = onDisableAutoListen,
@@ -2560,6 +2570,7 @@ private fun ListenerTabContent(
     onOpenHealth: () -> Unit,
     onOpenBackgroundSettings: () -> Unit,
     onOpenBackgroundReport: () -> Unit,
+    onOpenAutoBookkeepingStats: () -> Unit,
     onOpenMonitoredApps: () -> Unit,
     onEnableAutoListen: () -> Unit,
     onDisableAutoListen: () -> Unit,
@@ -2651,6 +2662,7 @@ private fun ListenerTabContent(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         YayaSmallToolButton("复制日志", Modifier.weight(1f), onCopyProblemLog)
                         YayaSmallToolButton("分享日志", Modifier.weight(1f), onShareProblemLog)
+                        YayaSmallToolButton("成功率", Modifier.weight(1f), onOpenAutoBookkeepingStats)
                     }
                 }
             }
@@ -4595,6 +4607,130 @@ private fun BackgroundReportScreen(
 }
 
 @Composable
+private fun AutoBookkeepingStatsScreen(
+    snapshot: AutoBookkeepingStatsSnapshot,
+    onBack: () -> Unit
+) {
+    val total = snapshot.total
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("MM月dd日") }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Spacer(Modifier.height(18.dp))
+            YayaSecondaryHeader(
+                title = "自动记账成功率",
+                subtitle = "${snapshot.fromDate.format(dateFormatter)}—${snapshot.toDate.format(dateFormatter)} · 最近 ${snapshot.windowDays} 天",
+                onBack = onBack
+            )
+        }
+        item {
+            YayaInfoBanner(
+                title = total.generationSuccessRatePercent?.let { "支付通知生成成功率 $it%" } ?: "还没有足够的支付通知数据",
+                message = "统计只保存每日计数，不保存通知正文、商户、金额、备注或账单内容。",
+                symbol = "率",
+                warning = total.generationSuccessRatePercent?.let { it < 80 } == true
+            )
+        }
+        item {
+            AutoBookkeepingCountersCard(
+                title = "总体漏斗",
+                counters = total
+            )
+        }
+        items(snapshot.bySource, key = { it.source.name }) { summary ->
+            AutoBookkeepingCountersCard(
+                title = summary.source.displayName,
+                counters = summary.counters
+            )
+        }
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("统计口径", color = PrimaryText, fontWeight = FontWeight.Bold)
+                    Text(
+                        "生成成功率 = 自动生成待确认账单 ÷ 支付相关通知。通知转化率 = 自动生成待确认账单 ÷ 已启用监听应用的全部通知。",
+                        color = MutedText,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        "支付软件没有发送系统通知时，APP 无法感知这次付款，因此不会进入统计分母。模拟通知、截图记账和手动补录不计入。",
+                        color = MutedText,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+        item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+@Composable
+private fun AutoBookkeepingCountersCard(
+    title: String,
+    counters: AutoBookkeepingCounters
+) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(title, color = PrimaryText, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(
+                    "生成 ${rateLabel(counters.generationSuccessRatePercent)} · 转化 ${rateLabel(counters.notificationConversionRatePercent)}",
+                    color = GreenDark,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            AutoBookkeepingMetricRow(
+                "收到监听通知" to counters.notificationReceived,
+                "支付相关通知" to counters.paymentRelated
+            )
+            AutoBookkeepingMetricRow(
+                "自动生成账单" to counters.pendingCreated,
+                "金额解析失败" to counters.amountParseFailed
+            )
+            AutoBookkeepingMetricRow(
+                "重复通知过滤" to counters.duplicateFiltered,
+                "用户确认" to counters.userConfirmed
+            )
+            AutoBookkeepingMetricRow(
+                "用户修改金额" to counters.userAmountEdited,
+                "用户删除" to counters.userDeleted
+            )
+        }
+    }
+}
+
+@Composable
+private fun AutoBookkeepingMetricRow(
+    left: Pair<String, Int>,
+    right: Pair<String, Int>
+) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        YayaMetricCard(left.first, "${left.second}", GreenDark, Modifier.weight(1f))
+        YayaMetricCard(right.first, "${right.second}", GreenDark, Modifier.weight(1f))
+    }
+}
+
+private fun rateLabel(value: Int?): String = value?.let { "$it%" } ?: "暂无"
+
+@Composable
 private fun PaymentTroubleshootingScreen(
     health: ListenerHealthStatus,
     onBack: () -> Unit,
@@ -6432,7 +6568,8 @@ private fun buildProblemLogText(
             recoverySnapshot = recoverySnapshot,
             probeSnapshot = probeSnapshot,
             diagnosticsReport = diagnosticsReport,
-            enabledMonitorApps = MonitoredAppConfig.enabledSummaryForLog(appContext)
+            enabledMonitorApps = MonitoredAppConfig.enabledSummaryForLog(appContext),
+            autoBookkeepingStats = (appContext as? BookkeepingApplication)?.autoBookkeepingStats?.snapshot()
         )
     )
 }
@@ -6461,6 +6598,7 @@ private enum class AppScreen {
     HEALTH,
     BACKGROUND_SETTINGS,
     BACKGROUND_REPORT,
+    AUTO_BOOKKEEPING_STATS,
     MONITORED_APPS,
     TROUBLESHOOTING,
     QUICK_BACKFILL,
