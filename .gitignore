@@ -17,6 +17,7 @@ release/
 *.bak
 *.tmp
 *.orig
+test-artifacts/**/*.xml
 window_*.xml
 bookkeeping_*.xml
 localbookkeeping-window.xml

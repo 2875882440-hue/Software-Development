@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>自动记账 APP · 全量 UI 原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body data-theme="seed">
+  <main class="prototype-shell">
+    <aside class="review-panel" aria-label="原型控制台">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">芽</span>
+        <div>
+          <p class="eyebrow">AUTOMATIC LEDGER</p>
+          <h1>自动记账<br>全量 UI 提案</h1>
+        </div>
+      </div>
+
+      <section class="control-section">
+        <div class="section-heading">
+          <span>视觉方案</span>
+          <span class="step-label">01</span>
+        </div>
+        <div class="theme-switcher" role="radiogroup" aria-label="选择视觉方案">
+          <button class="theme-option is-active" type="button" data-theme-option="seed" aria-pressed="true">
+            <i class="swatch swatch-seed"></i>
+            <span><strong>青芽日常</strong><small>亲切 · 平衡 · 推荐</small></span>
+          </button>
+          <button class="theme-option" type="button" data-theme-option="receipt" aria-pressed="false">
+            <i class="swatch swatch-receipt"></i>
+            <span><strong>阳光票据</strong><small>温暖 · 手账 · 活泼</small></span>
+          </button>
+          <button class="theme-option" type="button" data-theme-option="mint" aria-pressed="false">
+            <i class="swatch swatch-mint"></i>
+            <span><strong>薄荷数据</strong><small>清晰 · 专业 · 高效</small></span>
+          </button>
+        </div>
+      </section>
+
+      <section class="control-section screen-section">
+        <div class="section-heading">
+          <span>页面地图</span>
+          <span class="step-label">02</span>
+        </div>
+        <nav class="screen-nav" id="screenNav" aria-label="原型页面"></nav>
+      </section>
+
+      <div class="design-note">
+        <p class="eyebrow">DESIGN NOTE</p>
+        <p id="designNote">最贴近使用说明的品牌气质，用圆润卡片和清晰状态降低自动记账的理解成本。</p>
+      </div>
+    </aside>
+
+    <section class="preview-stage" aria-label="手机原型预览">
+      <header class="stage-header">
+        <div>
+          <p class="eyebrow">INTERACTIVE PROTOTYPE</p>
+          <h2 id="stageTitle">记账首页</h2>
+        </div>
+        <div class="stage-actions">
+          <span class="prototype-badge"><i></i> 可交互原型</span>
+          <button class="ghost-button" type="button" id="restartFlow">从引导开始</button>
+        </div>
+      </header>
+
+      <div class="phone-wrap">
+        <div class="ambient-shape shape-one"></div>
+        <div class="ambient-shape shape-two"></div>
+        <article class="phone" aria-label="自动记账 APP 手机界面">
+          <div class="phone-statusbar" aria-hidden="true">
+            <span>9:41</span>
+            <span class="status-icons">● ◒ ▰</span>
+          </div>
+          <div class="phone-screen" id="phoneScreen"></div>
+          <div class="phone-nav-layer" id="phoneNav"></div>
+          <div class="home-indicator" aria-hidden="true"></div>
+        </article>
+      </div>
+
+      <footer class="stage-footer">
+        <span id="screenCounter">01 / 14</span>
+        <span>390 × 844 · Android 高保真评审稿</span>
+      </footer>
+    </section>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

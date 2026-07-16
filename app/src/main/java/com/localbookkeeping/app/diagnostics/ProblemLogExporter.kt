@@ -33,7 +33,7 @@ object ProblemLogExporter {
         val conclusion = conclusionFor(snapshot)
         val suggestion = suggestionFor(snapshot, conclusion)
         return buildString {
-            appendLine("本地自动记账 - 问题日志")
+            appendLine("芽芽记账 - 问题日志")
             appendLine("导出时间：${formatTime(snapshot.exportTimeMillis)}")
             appendLine("APP版本：${snapshot.appVersionName}")
             appendLine("versionCode：${snapshot.versionCode}")

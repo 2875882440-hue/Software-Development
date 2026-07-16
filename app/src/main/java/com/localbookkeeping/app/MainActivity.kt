@@ -23,19 +23,24 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -44,8 +49,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -56,13 +63,16 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -75,11 +85,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -173,7 +192,17 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
         factory = BookkeepingViewModelFactory(app.repository)
     )
     val uiState by viewModel.uiState.collectAsState()
-    var screen by remember { mutableStateOf(initialScreen) }
+    val onboardingPreferences = remember {
+        context.applicationContext.getSharedPreferences(ONBOARDING_PREFS, Context.MODE_PRIVATE)
+    }
+    val firstScreen = remember(initialScreen) {
+        if (initialScreen == AppScreen.LEDGER && !onboardingPreferences.getBoolean(KEY_ONBOARDING_COMPLETED, false)) {
+            AppScreen.ONBOARDING
+        } else {
+            initialScreen
+        }
+    }
+    var screen by remember { mutableStateOf(firstScreen) }
     var selectedMainTab by remember {
         mutableStateOf(if (initialScreen == AppScreen.LEDGER) MainTab.BOOKKEEPING else MainTab.LISTENER)
     }
@@ -669,7 +698,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
     fun copyProblemLog() {
         val text = buildProblemLog()
         val clipboard = context.getSystemService(ClipboardManager::class.java)
-        clipboard?.setPrimaryClip(ClipData.newPlainText("本地自动记账问题日志", text))
+        clipboard?.setPrimaryClip(ClipData.newPlainText("芽芽记账问题日志", text))
         Toast.makeText(context, "问题日志已复制，可以发送给开发者。", Toast.LENGTH_SHORT).show()
     }
 
@@ -677,7 +706,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
         val text = buildProblemLog()
         val shareIntent = Intent(Intent.ACTION_SEND)
             .setType("text/plain")
-            .putExtra(Intent.EXTRA_SUBJECT, "本地自动记账 - 问题日志")
+            .putExtra(Intent.EXTRA_SUBJECT, "芽芽记账 - 问题日志")
             .putExtra(Intent.EXTRA_TEXT, text)
         context.startActivity(Intent.createChooser(shareIntent, "分享问题日志"))
     }
@@ -748,7 +777,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
     }
 
     LaunchedEffect(Unit) {
-        if (!startupAutoListenPromptChecked) {
+        if (firstScreen != AppScreen.ONBOARDING && !startupAutoListenPromptChecked) {
             startupAutoListenPromptChecked = true
             val autoEnabled = KeepAliveNotificationService.isEnabled(context)
             val foregroundRunning = KeepAliveNotificationService.isRunning(context)
@@ -819,14 +848,20 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
     }
 
     MaterialTheme(
-        colorScheme = MaterialTheme.colorScheme.copy(
-            primary = Green,
-            background = PageBackground,
-            surface = Color.White
-        )
+        colorScheme = YayaColorScheme,
+        shapes = YayaShapes
     ) {
         Surface(modifier = Modifier.fillMaxSize(), color = PageBackground) {
             when (screen) {
+                AppScreen.ONBOARDING -> OnboardingScreen(
+                    onStartSetup = {
+                        onboardingPreferences.edit().putBoolean(KEY_ONBOARDING_COMPLETED, true).apply()
+                        selectedMainTab = MainTab.LISTENER
+                        screen = AppScreen.LEDGER
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    }
+                )
+
                 AppScreen.LEDGER -> MainTabsScreen(
                     uiState = uiState,
                     selectedTab = selectedMainTab,
@@ -895,6 +930,10 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                         DailyLimitManager.setEnabled(context, enabled)
                         dailyLimitConfig = DailyLimitManager.load(context)
                         suppressInitialLimitAlert = true
+                    },
+                    onSetDailyLimitMuted = { muted ->
+                        DailyLimitManager.setMutedToday(context, muted)
+                        dailyLimitConfig = DailyLimitManager.load(context)
                     },
                     onOneClickRepair = { runOneClickRepair("listenerTabOneClickRepair") },
                     onListenerRescue = ::runListenerRescue,
@@ -1094,7 +1133,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                     },
                     onOneClickRepair = { runOneClickRepair("healthScreenOneClickRepair") },
                     onReauthorizeNotificationListener = {
-                        rebindMessage = "请在系统设置中关闭再重新开启本地自动记账的通知监听权限"
+                        rebindMessage = "请在系统设置中关闭再重新开启芽芽记账的通知监听权限"
                         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     },
                     onOpenBatterySettings = {
@@ -1125,6 +1164,7 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
 
                 AppScreen.BACKUP -> BackupScreen(
                     lastBackupAt = lastBackupAt,
+                    recordCount = uiState.confirmedRecords.size,
                     message = backupMessage,
                     busy = backupBusy,
                     onBack = ::navigateBack,
@@ -1237,6 +1277,11 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
                         ScreenshotPreviewScreen(
                             preview = preview,
                             onBack = ::navigateBack,
+                            onPickAnother = {
+                                screenshotPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
                             onConfirmExistingPending = { id, amountCents, type, category, merchantName, note, paidAtMillis ->
                                 viewModel.updatePendingAndConfirm(id, amountCents, type, category, merchantName, note, paidAtMillis)
                                 screen = AppScreen.LEDGER
@@ -1393,6 +1438,113 @@ private fun BookkeepingApp(app: BookkeepingApplication, initialScreen: AppScreen
 }
 
 @Composable
+private fun OnboardingScreen(onStartSetup: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(Modifier.height(28.dp))
+        YayaWelcomeMascot()
+        Spacer(Modifier.height(22.dp))
+        Text("你好，我是芽芽", color = GreenDark, fontSize = 27.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Serif)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "打开自动监听后，微信和支付宝付款会自动生成账单，账单只保存在你的手机里。",
+            color = MutedText,
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("纯本地", "自动记账", "隐私安全").forEach { label ->
+                Text(
+                    label,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(SoftGreen)
+                        .padding(horizontal = 11.dp, vertical = 6.dp),
+                    color = GreenDark,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+            border = androidx.compose.foundation.BorderStroke(1.dp, OutlineGreen)
+        ) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                YayaSetupStep("1", "开启通知监听权限", "只读取你选择的支付应用通知")
+                YayaSetupStep("2", "打开自动监听", "通知会显示“自动记账监听中”")
+                YayaSetupStep("3", "正常付款就会记账", "等待确认账单，回首页核对分类即可")
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Button(
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            shape = RoundedCornerShape(18.dp),
+            onClick = onStartSetup
+        ) {
+            Text("开始设置自动记账", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun YayaSetupStep(number: String, title: String, description: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(
+            modifier = Modifier.size(34.dp).clip(RoundedCornerShape(11.dp)).background(Green),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(number, color = Color.White, fontWeight = FontWeight.Black)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, color = PrimaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(description, color = MutedText, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun YayaWelcomeMascot() {
+    Box(modifier = Modifier.size(178.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            repeat(20) { index ->
+                val angle = Math.toRadians(index * 18.0)
+                val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                val inner = size.minDimension * .37f
+                val outer = size.minDimension * .49f
+                drawLine(
+                    color = GreenLight.copy(alpha = .48f),
+                    start = androidx.compose.ui.geometry.Offset(
+                        center.x + kotlin.math.cos(angle).toFloat() * inner,
+                        center.y + kotlin.math.sin(angle).toFloat() * inner
+                    ),
+                    end = androidx.compose.ui.geometry.Offset(
+                        center.x + kotlin.math.cos(angle).toFloat() * outer,
+                        center.y + kotlin.math.sin(angle).toFloat() * outer
+                    ),
+                    strokeWidth = 9.dp.toPx(),
+                    cap = StrokeCap.Square
+                )
+            }
+        }
+        Image(
+            painter = painterResource(R.drawable.mascot_yaya),
+            contentDescription = "账本芽芽吉祥物",
+            modifier = Modifier.size(150.dp),
+            contentScale = ContentScale.Fit
+        )
+    }
+}
+
+@Composable
 private fun MainTabsScreen(
     uiState: BookkeepingUiState,
     selectedTab: MainTab,
@@ -1432,55 +1584,27 @@ private fun MainTabsScreen(
     onOpenRecordDetail: (ExpenseRecord) -> Unit,
     onSaveDailyLimit: (Boolean, Long) -> Unit,
     onToggleDailyLimit: (Boolean) -> Unit,
+    onSetDailyLimitMuted: (Boolean) -> Unit,
     onOneClickRepair: () -> Unit,
     onListenerRescue: () -> Unit,
     onCopyProblemLog: () -> Unit,
     onShareProblemLog: () -> Unit,
     onOpenNotificationSettings: () -> Unit
 ) {
+    var showingTools by remember { mutableStateOf(false) }
     Scaffold(
         containerColor = PageBackground,
         bottomBar = {
-            NavigationBar(containerColor = Color.White) {
-                NavigationBarItem(
-                    selected = selectedTab == MainTab.BOOKKEEPING,
-                    onClick = { onSelectedTabChange(MainTab.BOOKKEEPING) },
-                    label = { Text("记账") },
-                    icon = { Text("") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == MainTab.STATS,
-                    onClick = { onSelectedTabChange(MainTab.STATS) },
-                    label = { Text("统计") },
-                    icon = { Text("") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == MainTab.LIMIT,
-                    onClick = { onSelectedTabChange(MainTab.LIMIT) },
-                    label = { Text("限额") },
-                    icon = { Text("") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == MainTab.LISTENER,
-                    onClick = { onSelectedTabChange(MainTab.LISTENER) },
-                    label = { Text("监听") },
-                    icon = { Text("") }
-                )
-            }
+            if (!showingTools) YayaBottomNavigation(selectedTab, onSelectedTabChange, onAdd)
         },
-        floatingActionButton = {
-            if (selectedTab == MainTab.BOOKKEEPING) {
-                FloatingActionButton(onClick = onAdd, containerColor = Green) {
-                    Text("+", color = Color.White, fontSize = 28.sp)
-                }
-            }
-        }
     ) { padding ->
         when (selectedTab) {
             MainTab.BOOKKEEPING -> BookkeepingTabContent(
                 modifier = Modifier.padding(padding),
                 uiState = uiState,
                 listState = bookkeepingListState,
+                showingTools = showingTools,
+                onShowingToolsChange = { showingTools = it },
                 autoListeningEnabled = autoListeningEnabled,
                 autoListenServiceMissing = autoListenServiceMissing,
                 screenshotOcrBusy = screenshotOcrBusy,
@@ -1494,6 +1618,10 @@ private fun MainTabsScreen(
                 onOpenWechatScanBackfill = onOpenWechatScanBackfill,
                 onOpenScreenshotPicker = onOpenScreenshotPicker,
                 onOpenLearning = onOpenLearning,
+                onOpenHealth = onOpenHealth,
+                onOpenBackgroundSettings = onOpenBackgroundSettings,
+                onOpenBackgroundReport = onOpenBackgroundReport,
+                onOpenMonitoredApps = onOpenMonitoredApps,
                 onGoToListenerTab = onGoToListenerTab,
                 onRestoreAutoListen = onRestoreAutoListen,
                 onOpenRecordDetail = onOpenRecordDetail
@@ -1509,9 +1637,11 @@ private fun MainTabsScreen(
             MainTab.LIMIT -> DailyLimitTabContent(
                 modifier = Modifier.padding(padding),
                 status = dailyLimitStatus,
+                records = uiState.confirmedRecords,
                 listState = dailyLimitListState,
                 onSaveDailyLimit = onSaveDailyLimit,
-                onToggleDailyLimit = onToggleDailyLimit
+                onToggleDailyLimit = onToggleDailyLimit,
+                onSetMutedToday = onSetDailyLimitMuted
             )
 
             MainTab.LISTENER -> ListenerTabContent(
@@ -1543,10 +1673,294 @@ private fun MainTabsScreen(
 }
 
 @Composable
+private fun YayaBottomNavigation(
+    selectedTab: MainTab,
+    onSelectedTabChange: (MainTab) -> Unit,
+    onAdd: () -> Unit
+) {
+    val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 30.dp, bottomEnd = 30.dp)
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .height(70.dp)
+            .shadow(12.dp, shape),
+        shape = shape,
+        color = SurfaceWhite,
+        border = androidx.compose.foundation.BorderStroke(1.dp, OutlineGreen)
+    ) {
+        Row(Modifier.fillMaxSize().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            YayaBottomItem("home", "记账", selectedTab == MainTab.BOOKKEEPING, Modifier.weight(1f)) {
+                onSelectedTabChange(MainTab.BOOKKEEPING)
+            }
+            YayaBottomItem("chart", "统计", selectedTab == MainTab.STATS, Modifier.weight(1f)) {
+                onSelectedTabChange(MainTab.STATS)
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Surface(
+                    modifier = Modifier.size(54.dp).offset(y = (-15).dp).clickable(onClick = onAdd),
+                    shape = RoundedCornerShape(18.dp),
+                    color = Green,
+                    shadowElevation = 10.dp,
+                    border = androidx.compose.foundation.BorderStroke(4.dp, PageBackground)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("+", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Light)
+                    }
+                }
+            }
+            YayaBottomItem("wallet", "限额", selectedTab == MainTab.LIMIT, Modifier.weight(1f)) {
+                onSelectedTabChange(MainTab.LIMIT)
+            }
+            YayaBottomItem("bell", "监听", selectedTab == MainTab.LISTENER, Modifier.weight(1f)) {
+                onSelectedTabChange(MainTab.LISTENER)
+            }
+        }
+    }
+}
+
+@Composable
+private fun YayaBottomItem(
+    iconKind: String,
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = modifier.fillMaxSize().clickable(onClick = onClick).padding(top = 8.dp, bottom = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        YayaLineIcon(iconKind, if (selected) Green else MutedText)
+        Text(label, color = if (selected) Green else MutedText, fontSize = 10.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun YayaLineIcon(kind: String, color: Color, modifier: Modifier = Modifier.size(20.dp)) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = Stroke(width = 1.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        when (kind) {
+            "home" -> {
+                val roof = Path().apply { moveTo(w * .12f, h * .48f); lineTo(w * .5f, h * .14f); lineTo(w * .88f, h * .48f) }
+                drawPath(roof, color, style = stroke)
+                val body = Path().apply { moveTo(w * .22f, h * .42f); lineTo(w * .22f, h * .86f); lineTo(w * .78f, h * .86f); lineTo(w * .78f, h * .42f) }
+                drawPath(body, color, style = stroke)
+            }
+            "chart" -> {
+                drawLine(color, androidx.compose.ui.geometry.Offset(w * .2f, h * .82f), androidx.compose.ui.geometry.Offset(w * .2f, h * .5f), stroke.width, StrokeCap.Round)
+                drawLine(color, androidx.compose.ui.geometry.Offset(w * .5f, h * .82f), androidx.compose.ui.geometry.Offset(w * .5f, h * .25f), stroke.width, StrokeCap.Round)
+                drawLine(color, androidx.compose.ui.geometry.Offset(w * .8f, h * .82f), androidx.compose.ui.geometry.Offset(w * .8f, h * .4f), stroke.width, StrokeCap.Round)
+                drawLine(color, androidx.compose.ui.geometry.Offset(w * .08f, h * .84f), androidx.compose.ui.geometry.Offset(w * .92f, h * .84f), stroke.width, StrokeCap.Round)
+            }
+            "wallet" -> {
+                drawRoundRect(color, topLeft = androidx.compose.ui.geometry.Offset(w * .1f, h * .24f), size = androidx.compose.ui.geometry.Size(w * .8f, h * .58f), cornerRadius = CornerRadius(w * .12f), style = stroke)
+                drawLine(color, androidx.compose.ui.geometry.Offset(w * .62f, h * .53f), androidx.compose.ui.geometry.Offset(w * .86f, h * .53f), stroke.width, StrokeCap.Round)
+            }
+            "apps" -> {
+                val cell = w * .22f
+                listOf(.18f to .18f, .6f to .18f, .18f to .6f, .6f to .6f).forEach { (x, y) ->
+                    drawRoundRect(color, androidx.compose.ui.geometry.Offset(w * x, h * y), androidx.compose.ui.geometry.Size(cell, cell), CornerRadius(w * .05f), style = stroke)
+                }
+            }
+            else -> {
+                val bell = Path().apply {
+                    moveTo(w * .22f, h * .7f); cubicTo(w * .3f, h * .6f, w * .28f, h * .28f, w * .5f, h * .22f)
+                    cubicTo(w * .72f, h * .28f, w * .7f, h * .6f, w * .78f, h * .7f); close()
+                }
+                drawPath(bell, color, style = stroke)
+                drawLine(color, androidx.compose.ui.geometry.Offset(w * .43f, h * .82f), androidx.compose.ui.geometry.Offset(w * .57f, h * .82f), stroke.width, StrokeCap.Round)
+            }
+        }
+    }
+}
+
+@Composable
+private fun yayaNavigationColors() = NavigationBarItemDefaults.colors(
+    selectedIconColor = GreenDark,
+    selectedTextColor = GreenDark,
+    indicatorColor = Color.Transparent,
+    unselectedIconColor = MutedText,
+    unselectedTextColor = MutedText
+)
+
+@Composable
+private fun YayaNavIcon(symbol: String, selected: Boolean) {
+    Box(
+        modifier = Modifier
+            .size(32.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (selected) SoftGreen else Color.Transparent),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = symbol,
+            color = if (selected) GreenDark else MutedText,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun YayaMascot(modifier: Modifier = Modifier) {
+    Image(
+        painter = painterResource(R.drawable.mascot_yaya),
+        contentDescription = "芽芽",
+        modifier = modifier.size(72.dp),
+        contentScale = ContentScale.Fit
+    )
+}
+
+@Composable
+private fun YayaPageHeader(title: String, subtitle: String) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(title, color = PrimaryText, fontSize = 23.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Serif)
+        Text(subtitle, color = MutedText, fontSize = 10.sp)
+    }
+}
+
+@Composable
+private fun YayaSecondaryHeader(title: String, subtitle: String, onBack: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().height(58.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = PrimaryText, fontSize = 23.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Serif)
+            if (subtitle.isNotBlank()) Text(subtitle, color = MutedText, fontSize = 10.sp)
+        }
+        Box(
+            modifier = Modifier.size(38.dp).clip(RoundedCornerShape(14.dp)).background(SurfaceWhite)
+                .border(1.dp, OutlineGreen, RoundedCornerShape(14.dp)).clickable(onClick = onBack),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("‹", color = GreenDark, fontSize = 28.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun YayaInfoBanner(
+    title: String,
+    message: String,
+    symbol: String = "芽",
+    warning: Boolean = false
+) {
+    val container = if (warning) Color(0xFFFFF4C5) else SoftGreen
+    val accent = if (warning) Color(0xFF735400) else GreenDark
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = container)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier.size(38.dp).clip(RoundedCornerShape(13.dp)).background(SurfaceWhite),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(symbol, color = accent, fontWeight = FontWeight.Black)
+            }
+            Column(Modifier.weight(1f)) {
+                Text(title, color = accent, fontWeight = FontWeight.Bold)
+                Text(message, color = MutedText, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun YayaPageIntro(title: String, message: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(SoftGreen)
+            .border(1.dp, OutlineGreen, RoundedCornerShape(24.dp)).padding(15.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = GreenDark, fontSize = 16.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Serif)
+            Text(message, color = MutedText, fontSize = 9.sp, lineHeight = 14.sp)
+        }
+        YayaMascot(Modifier.size(92.dp))
+    }
+}
+
+@Composable
+private fun YayaEmptyState(
+    title: String,
+    message: String,
+    actionLabel: String = "",
+    onAction: (() -> Unit)? = null
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(26.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            YayaMascot()
+            Text(title, color = PrimaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(message, color = MutedText, fontSize = 13.sp, textAlign = TextAlign.Center)
+            if (actionLabel.isNotBlank() && onAction != null) {
+                Button(onClick = onAction) { Text(actionLabel) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun YayaSectionTitle(title: String, subtitle: String = "") {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
+        Text(title, color = PrimaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        if (subtitle.isNotBlank()) Text(subtitle, color = MutedText, fontSize = 12.sp)
+    }
+}
+
+@Composable
+private fun AutoListenRunningCard(onGoToListenerTab: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onGoToListenerTab),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = SoftGreen)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier.size(34.dp).clip(RoundedCornerShape(12.dp)).background(SurfaceWhite),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("✓", color = Green, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+            Column(Modifier.weight(1f)) {
+                Text("自动记账运行正常", color = GreenDark, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("微信、支付宝付款通知正在监听", color = MutedText, fontSize = 9.sp)
+            }
+            Text("查看", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
 private fun BookkeepingTabContent(
     modifier: Modifier = Modifier,
     uiState: BookkeepingUiState,
     listState: LazyListState,
+    showingTools: Boolean,
+    onShowingToolsChange: (Boolean) -> Unit,
     autoListeningEnabled: Boolean,
     autoListenServiceMissing: Boolean,
     screenshotOcrBusy: Boolean,
@@ -1560,111 +1974,263 @@ private fun BookkeepingTabContent(
     onOpenWechatScanBackfill: () -> Unit,
     onOpenScreenshotPicker: () -> Unit,
     onOpenLearning: () -> Unit,
+    onOpenHealth: () -> Unit,
+    onOpenBackgroundSettings: () -> Unit,
+    onOpenBackgroundReport: () -> Unit,
+    onOpenMonitoredApps: () -> Unit,
     onGoToListenerTab: () -> Unit,
     onRestoreAutoListen: () -> Unit,
     onOpenRecordDetail: (ExpenseRecord) -> Unit
 ) {
-    var ledgerGroupType by remember { mutableStateOf(BillGroupType.DAY) }
-    val todayStats = BillStatisticsCalculator.calculate(
-        uiState.confirmedRecords,
-        BillStatisticsCalculator.rangeFor(StatsRangeType.TODAY)
-    )
-    val weekStats = BillStatisticsCalculator.calculate(
-        uiState.confirmedRecords,
-        BillStatisticsCalculator.rangeFor(StatsRangeType.WEEK)
-    )
     val monthStats = BillStatisticsCalculator.calculate(
         uiState.confirmedRecords,
         BillStatisticsCalculator.rangeFor(StatsRangeType.MONTH)
     )
-    val ledgerGroups = BillStatisticsCalculator.calculate(
-        records = uiState.confirmedRecords,
-        range = TimeRange(0L, Long.MAX_VALUE, "全部"),
-        groupType = ledgerGroupType
-    ).groups
+    BackHandler(enabled = showingTools) { onShowingToolsChange(false) }
+
+    if (showingTools) {
+        YayaAllToolsContent(
+            modifier = modifier,
+            pendingCount = uiState.pendingCount,
+            screenshotOcrBusy = screenshotOcrBusy,
+            onBack = { onShowingToolsChange(false) },
+            onAdd = onAdd,
+            onOpenPending = onOpenPending,
+            onOpenScreenshotPicker = onOpenScreenshotPicker,
+            onOpenQuickBackfill = onOpenQuickBackfill,
+            onOpenWechatScanBackfill = onOpenWechatScanBackfill,
+            onOpenRules = onOpenRules,
+            onOpenLearning = onOpenLearning,
+            onOpenBackup = onOpenBackup,
+            onOpenHealth = onOpenHealth,
+            onOpenBackgroundSettings = onOpenBackgroundSettings,
+            onOpenBackgroundReport = onOpenBackgroundReport,
+            onOpenMonitoredApps = onOpenMonitoredApps
+        )
+        return
+    }
+
+    val today = LocalDate.now()
+    val weekday = listOf("一", "二", "三", "四", "五", "六", "日")[today.dayOfWeek.value - 1]
 
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Spacer(Modifier.height(18.dp))
-            Text("本地自动记账", color = PrimaryText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text(APP_VERSION_DISPLAY, color = MutedText)
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth().height(58.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("${today.monthValue} 月 ${today.dayOfMonth} 日 · 星期$weekday", color = MutedText, fontSize = 10.sp)
+                    Text("早上好，今天也要轻松记账", color = PrimaryText, fontSize = 22.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Serif)
+                }
+                Box(
+                    modifier = Modifier.size(38.dp).clip(RoundedCornerShape(14.dp)).background(SurfaceWhite)
+                        .border(1.dp, OutlineGreen, RoundedCornerShape(14.dp))
+                        .clickable { onShowingToolsChange(true) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    YayaLineIcon("apps", GreenDark)
+                }
+            }
         }
         if (!autoListeningEnabled) {
             item { AutoListenDisabledWarningCard(onGoToListenerTab) }
         } else if (autoListenServiceMissing) {
             item { AutoListenIncompleteWarningCard(onRestoreAutoListen) }
+        } else {
+            item { AutoListenRunningCard(onGoToListenerTab) }
         }
-        item { SummaryCard(uiState, onOpenPending) }
-        item { PeriodExpenseCard(todayStats, weekStats, monthStats) }
+        item { SummaryCard(uiState, monthStats, onOpenPending) }
         item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("快捷操作", color = PrimaryText, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onAdd) { Text("记一笔") }
-                        OutlinedButton(onClick = onOpenPending) { Text("待确认 ${uiState.pendingCount}") }
-                        OutlinedButton(onClick = onOpenStats) { Text("统计") }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onOpenRules) { Text("分类规则") }
-                        OutlinedButton(onClick = onOpenLearning) { Text("学习记录") }
-                        OutlinedButton(onClick = onOpenQuickBackfill) { Text("补录") }
-                    }
-                    Button(
-                        modifier = Modifier.fillMaxWidth().height(46.dp),
-                        onClick = onOpenWechatScanBackfill
-                    ) {
-                        Text("扫码支付后补录")
-                    }
-                    OutlinedButton(
-                        modifier = Modifier.fillMaxWidth().height(46.dp),
-                        onClick = onOpenBackup
-                    ) {
-                        Text("备份与恢复")
-                    }
-                    Button(
-                        modifier = Modifier.fillMaxWidth().height(46.dp),
-                        onClick = onOpenScreenshotPicker,
-                        enabled = !screenshotOcrBusy
-                    ) {
-                        Text(if (screenshotOcrBusy) "正在识别..." else "截图记账")
-                    }
-                    if (screenshotOcrError.isNotBlank()) {
-                        Text(screenshotOcrError, color = Red, fontSize = 13.sp)
-                    }
-                }
+            YayaPrototypeSectionTitle("快捷记账", "全部工具") { onShowingToolsChange(true) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                YayaQuickAction("✎", "手动记账", SurfaceWhite, GreenDark, Modifier.weight(1f), onAdd)
+                YayaQuickAction("◷", "待确认 · ${uiState.pendingCount}", Color(0xFFFFF4C5), Color(0xFF8A5C00), Modifier.weight(1f), onOpenPending)
+                YayaQuickAction("⌗", if (screenshotOcrBusy) "识别中" else "截图记账", Color(0xFFE9F2FF), Color(0xFF4C8DDF), Modifier.weight(1f), onOpenScreenshotPicker)
+                YayaQuickAction("◎", "扫码补录", Color(0xFFFFEFEC), Red, Modifier.weight(1f), onOpenWechatScanBackfill)
             }
+            if (screenshotOcrError.isNotBlank()) Text(screenshotOcrError, color = Red, fontSize = 11.sp)
         }
         item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("最近账单",  color = PrimaryText, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatsRangeButton("按天", ledgerGroupType == BillGroupType.DAY) { ledgerGroupType = BillGroupType.DAY }
-                        StatsRangeButton("按周", ledgerGroupType == BillGroupType.WEEK) { ledgerGroupType = BillGroupType.WEEK }
-                        StatsRangeButton("按月", ledgerGroupType == BillGroupType.MONTH) { ledgerGroupType = BillGroupType.MONTH }
-                    }
-                }
-            }
+            YayaPrototypeSectionTitle("最近账单", if (uiState.confirmedRecords.size > 3) "查看全部" else "") { }
         }
         if (uiState.confirmedRecords.isEmpty()) {
             item { EmptyLedgerCard(onAdd) }
         } else {
-            items(ledgerGroups.take(8), key = { it.label }) { group ->
-                BillGroupCard(group, onRecordClick = onOpenRecordDetail)
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, OutlineGreen)
+                ) {
+                    Column {
+                        uiState.confirmedRecords.take(3).forEachIndexed { index, record ->
+                            YayaRecentBillRow(record, onOpenRecordDetail)
+                            if (index < minOf(2, uiState.confirmedRecords.lastIndex)) {
+                                Box(Modifier.fillMaxWidth().height(1.dp).background(OutlineGreen))
+                            }
+                        }
+                    }
+                }
             }
         }
-        item { Spacer(Modifier.height(84.dp)) }
+        item { Spacer(Modifier.height(18.dp)) }
+    }
+}
+
+@Composable
+private fun YayaPrototypeSectionTitle(title: String, action: String = "", onAction: () -> Unit = {}) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 7.dp, start = 2.dp, end = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, color = PrimaryText, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        if (action.isNotBlank()) Text(action, modifier = Modifier.clickable(onClick = onAction), color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun YayaQuickAction(
+    symbol: String,
+    label: String,
+    container: Color,
+    content: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = modifier.clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)).background(container)
+                .border(1.dp, OutlineGreen, RoundedCornerShape(16.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(symbol, color = content, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+        Text(label, color = PrimaryText, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+@Composable
+private fun YayaRecentBillRow(record: ExpenseRecord, onClick: (ExpenseRecord) -> Unit) {
+    val isIncome = record.type == TransactionType.INCOME
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable { onClick(record) }.padding(horizontal = 13.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        CategoryBubble(record.category, isIncome)
+        Column(Modifier.weight(1f)) {
+            Text(record.merchantName.ifBlank { record.category }, color = PrimaryText, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("${record.category} · ${record.sourceApp} · ${formatDate(record.paidAtMillis)}", color = MutedText, fontSize = 9.sp, maxLines = 1)
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(formatMoney(if (isIncome) record.amountCents else -record.amountCents), color = if (isIncome) Green else Red, fontSize = 12.sp, fontWeight = FontWeight.Black)
+            Text(if (isIncome) "收入" else "支出", color = MutedText, fontSize = 8.sp)
+        }
+    }
+}
+
+@Composable
+private fun YayaAllToolsContent(
+    modifier: Modifier,
+    pendingCount: Int,
+    screenshotOcrBusy: Boolean,
+    onBack: () -> Unit,
+    onAdd: () -> Unit,
+    onOpenPending: () -> Unit,
+    onOpenScreenshotPicker: () -> Unit,
+    onOpenQuickBackfill: () -> Unit,
+    onOpenWechatScanBackfill: () -> Unit,
+    onOpenRules: () -> Unit,
+    onOpenLearning: () -> Unit,
+    onOpenBackup: () -> Unit,
+    onOpenHealth: () -> Unit,
+    onOpenBackgroundSettings: () -> Unit,
+    onOpenBackgroundReport: () -> Unit,
+    onOpenMonitoredApps: () -> Unit
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item { Spacer(Modifier.height(10.dp)); YayaSecondaryHeader("全部工具", "常用能力和本地数据管理", onBack) }
+        item { YayaPrototypeSectionTitle("快速记账") }
+        item {
+            YayaToolRow(
+                YayaToolSpec("⌗", if (screenshotOcrBusy) "正在识别" else "截图记账", "识别支付截图中的金额和商户", onOpenScreenshotPicker),
+                YayaToolSpec("✎", "快速补录", "付款后手动补一笔账单", onAdd)
+            )
+        }
+        item {
+            YayaToolRow(
+                YayaToolSpec("◎", "扫码支付补录", "为没有通知的扫码付款补账", onOpenWechatScanBackfill),
+                YayaToolSpec("◷", "待确认账单", "还有 $pendingCount 笔需要核对", onOpenPending)
+            )
+        }
+        item { YayaPrototypeSectionTitle("整理与学习") }
+        item {
+            YayaToolRow(
+                YayaToolSpec("规", "分类规则", "设置关键词自动分类", onOpenRules),
+                YayaToolSpec("学", "学习记录", "管理芽芽记住的商户分类", onOpenLearning)
+            )
+        }
+        item { YayaPrototypeSectionTitle("数据与系统") }
+        item {
+            YayaToolRow(
+                YayaToolSpec("备", "备份与恢复", "导出 CSV 或完整 JSON 备份", onOpenBackup),
+                YayaToolSpec("诊", "问题诊断", "检查监听、权限和后台状态", onOpenHealth)
+            )
+        }
+        item {
+            YayaToolRow(
+                YayaToolSpec("应", "监控应用", "选择需要监听的支付应用", onOpenMonitoredApps),
+                YayaToolSpec("设", "系统设置", "监听应用与后台运行建议", onOpenBackgroundSettings)
+            )
+        }
+        item { Spacer(Modifier.height(18.dp)) }
+    }
+}
+
+private data class YayaToolSpec(val symbol: String, val title: String, val description: String, val onClick: () -> Unit)
+
+@Composable
+private fun YayaToolRow(left: YayaToolSpec, right: YayaToolSpec) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        YayaToolCard(left, Modifier.weight(1f))
+        YayaToolCard(right, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun YayaToolCard(spec: YayaToolSpec, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.clickable(onClick = spec.onClick),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+        border = androidx.compose.foundation.BorderStroke(1.dp, OutlineGreen)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.size(38.dp).clip(RoundedCornerShape(13.dp)).background(SoftGreen), contentAlignment = Alignment.Center) {
+                Text(spec.symbol, color = GreenDark, fontWeight = FontWeight.Black)
+            }
+            Text(spec.title, color = PrimaryText, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(spec.description, color = MutedText, fontSize = 9.sp, lineHeight = 13.sp)
+        }
     }
 }
 
 @Composable
 private fun BackupScreen(
     lastBackupAt: Long,
+    recordCount: Int,
     message: String,
     busy: Boolean,
     onBack: () -> Unit,
@@ -1673,54 +2239,62 @@ private fun BackupScreen(
     onImportJson: () -> Unit
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("备份与恢复", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("导出 CSV、导出 JSON 备份，或从 JSON 恢复账单。", color = MutedText)
+            YayaSecondaryHeader("备份与恢复", "所有文件都由你选择保存位置", onBack)
+        }
+        item {
+            YayaInfoBanner(
+                title = "账单只保存在本机",
+                message = "芽芽记账不会上传账单或通知内容，恢复时也会自动跳过重复账单。",
+                symbol = "锁"
+            )
         }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("最近一次备份", color = PrimaryText, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (lastBackupAt > 0L) formatDateTime(lastBackupAt) else "暂无备份",
-                        color = if (lastBackupAt > 0L) Green else MutedText
-                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("完整备份", color = PrimaryText, fontWeight = FontWeight.Bold)
+                            Text("包含账单原始字段，可用于恢复", color = MutedText, fontSize = 10.sp)
+                        }
+                        Text("JSON", modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(SoftGreen).padding(horizontal = 10.dp, vertical = 6.dp), color = GreenDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    HealthStatusRow("账单数量", "$recordCount 笔")
+                    HealthStatusRow("上次备份", if (lastBackupAt > 0L) formatDate(lastBackupAt) else "暂无备份")
+                    Button(modifier = Modifier.fillMaxWidth().height(48.dp), enabled = !busy, onClick = onExportJson) {
+                        Text("立即完整备份")
+                    }
                 }
             }
         }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("导出", color = PrimaryText, fontWeight = FontWeight.SemiBold)
-                    Button(
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        enabled = !busy,
-                        onClick = onExportJson
-                    ) {
-                        Text("导出 JSON 备份")
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("导出表格", color = PrimaryText, fontWeight = FontWeight.Bold)
+                            Text("适合在电脑上查看和整理账单", color = MutedText, fontSize = 10.sp)
+                        }
+                        Text("CSV", modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(SoftGreen).padding(horizontal = 10.dp, vertical = 6.dp), color = GreenDark, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         enabled = !busy,
                         onClick = onExportCsv
                     ) {
-                        Text("导出 CSV")
+                        Text("导出 CSV 表格")
                     }
                 }
             }
@@ -1728,18 +2302,18 @@ private fun BackupScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("恢复", color = PrimaryText, fontWeight = FontWeight.SemiBold)
-                    Text("从 JSON 恢复，已存在的重复账单会自动跳过。", color = MutedText, fontSize = 13.sp)
+                    Text("从备份恢复", color = PrimaryText, fontWeight = FontWeight.Bold)
+                    Text("自动跳过重复账单，不会清空现有数据", color = MutedText, fontSize = 10.sp)
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         enabled = !busy,
                         onClick = onImportJson
                     ) {
-                        Text("从 JSON 恢复")
+                        Text("选择 JSON 备份文件")
                     }
                 }
             }
@@ -1748,8 +2322,8 @@ private fun BackupScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
                 ) {
                     Text(
                         text = if (busy) "处理中..." else message,
@@ -1767,14 +2341,21 @@ private fun BackupScreen(
 private fun DailyLimitTabContent(
     modifier: Modifier = Modifier,
     status: DailyLimitStatus,
+    records: List<ExpenseRecord>,
     listState: LazyListState,
     onSaveDailyLimit: (Boolean, Long) -> Unit,
-    onToggleDailyLimit: (Boolean) -> Unit
+    onToggleDailyLimit: (Boolean) -> Unit,
+    onSetMutedToday: (Boolean) -> Unit
 ) {
     var amountText by remember(status.limitCents) {
         mutableStateOf(if (status.limitCents > 0L) formatYuanInput(status.limitCents) else "")
     }
     var error by remember { mutableStateOf("") }
+    val todayStats = BillStatisticsCalculator.calculate(
+        records,
+        BillStatisticsCalculator.rangeFor(StatsRangeType.TODAY)
+    )
+    val todayMuted = status.config.mutedDate == LocalDate.now().toString()
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize().padding(horizontal = 18.dp),
@@ -1782,91 +2363,39 @@ private fun DailyLimitTabContent(
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Text("今日限额",  color = PrimaryText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("设置每日限额并查看今日消费进度",  color = MutedText)
+            YayaPageHeader("每日限额", "把每一天都花在计划里")
         }
         item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("今日限额",  color = PrimaryText, fontWeight = FontWeight.Bold)
-                            Text(if (status.enabled) "已启用" else "未启用", color = MutedText, fontSize = 13.sp)
-                        }
-                        Switch(
-                            checked = status.enabled,
-                            onCheckedChange = { enabled ->
-                                if (enabled && status.limitCents <= 0L) {
-                                    error = "请先设置每日限额"
-                                } else {
-                                    error = ""
-                                    onToggleDailyLimit(enabled)
-                                }
-                            }
-                        )
-                    }
+            YayaDailyLimitOverview(status, todayStats.categoryItems)
+        }
+        item { YayaPrototypeSectionTitle("限额设置") }
+        item {
+            Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
                         value = amountText,
-                        onValueChange = {
-                            amountText = it
-                            error = ""
-                        },
+                        onValueChange = { amountText = it; error = "" },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("设置每日限额，例如 100") },
+                        label = { Text("每日最多花多少钱") },
+                        suffix = { Text("元") },
+                        shape = RoundedCornerShape(16.dp),
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                     )
+                    YayaLimitToggleRow("按预算控制提醒", "达到限额时提醒你", status.enabled) { enabled ->
+                        if (enabled && status.limitCents <= 0L) error = "请先设置每日限额" else onToggleDailyLimit(enabled)
+                    }
+                    YayaLimitToggleRow("今天不再提醒", "仅暂停今天的超额提醒", todayMuted, onSetMutedToday)
+                    if (error.isNotBlank()) Text(error, color = Red, fontSize = 11.sp)
                     Button(
-                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(17.dp),
                         onClick = {
                             val cents = parseAmountCents(amountText)
-                            if (cents == null || cents <= 0L) {
-                                error = "请输入大于 0 的金额"
-                            } else {
-                                error = ""
-                                onSaveDailyLimit(true, cents)
-                            }
+                            if (cents == null || cents <= 0L) error = "请输入大于 0 的金额"
+                            else { error = ""; onSaveDailyLimit(true, cents) }
                         }
-                    ) {
-                        Text("设置每日限额")
-                    }
-                    if (status.enabled) {
-                        OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { onToggleDailyLimit(false) }) {
-                            Text("关闭限额")
-                        }
-                    }
-                    if (error.isNotBlank()) {
-                        Text(error, color = Red, fontSize = 13.sp)
-                    }
-                }
-            }
-        }
-        item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("今日消费", color = PrimaryText, fontWeight = FontWeight.Bold)
-                    HealthStatusRow("今日已消费", formatMoney(status.spentCents))
-                    if (status.exceeded) {
-                        HealthStatusRow("已超额", formatMoney(status.exceededCents))
-                    } else {
-                        HealthStatusRow("剩余额度", if (status.enabled) formatMoney(status.remainingCents) else "未启用")
-                    }
-                    LinearProgressIndicator(
-                        progress = { status.progress },
-                        modifier = Modifier.fillMaxWidth().height(8.dp),
-                        color = if (status.exceeded) Red else Green,
-                        trackColor = PageBackground
-                    )
-                    Text(
-                        if (status.exceeded) "已超额" else "未超额",
-                        color = if (status.exceeded) Red else MutedText,
-                        fontSize = 13.sp,
-                        fontWeight = if (status.exceeded) FontWeight.SemiBold else FontWeight.Normal
-                    )
+                    ) { Text("保存限额", fontWeight = FontWeight.Bold) }
                 }
             }
         }
@@ -1875,18 +2404,95 @@ private fun DailyLimitTabContent(
 }
 
 @Composable
+private fun YayaDailyLimitOverview(status: DailyLimitStatus, categories: List<com.localbookkeeping.app.stats.SummaryItem>) {
+    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text("今天的预算", color = PrimaryText, fontWeight = FontWeight.Bold)
+                    Text(if (status.enabled) "提醒已开启" else "提醒未开启", color = MutedText, fontSize = 10.sp)
+                }
+                Text(if (status.exceeded) "已超额" else if (status.enabled) "提醒已开启" else "未启用", color = if (status.exceeded) Red else Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            Box(Modifier.fillMaxWidth().height(165.dp), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.size(150.dp)) {
+                    drawArc(OutlineGreen, -90f, 360f, false, style = Stroke(18.dp.toPx(), cap = StrokeCap.Butt))
+                    drawArc(if (status.exceeded) Red else Green, -90f, status.progress * 360f, false, style = Stroke(18.dp.toPx(), cap = StrokeCap.Butt))
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("今日已花", color = MutedText, fontSize = 10.sp)
+                    Text(formatMoney(status.spentCents), color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                    Text(if (status.limitCents > 0L) "/ ${formatMoney(status.limitCents)}" else "尚未设置限额", color = MutedText, fontSize = 10.sp)
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(if (status.exceeded) "已超额金额" else "剩余额度", color = MutedText, fontSize = 11.sp)
+                Text(
+                    text = when {
+                        !status.enabled -> "未启用"
+                        status.exceeded -> formatMoney(status.exceededCents)
+                        else -> formatMoney(status.remainingCents)
+                    },
+                    color = if (status.exceeded) Red else GreenDark,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (categories.isEmpty()) {
+                Text("今天还没有支出记录", color = MutedText, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+            } else {
+                categories.take(3).forEach { item ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(item.label, color = MutedText, fontSize = 10.sp, modifier = Modifier.width(45.dp))
+                        LinearProgressIndicator(
+                            progress = { item.percent.toFloat() },
+                            modifier = Modifier.weight(1f).height(7.dp).clip(RoundedCornerShape(99.dp)),
+                            color = if (item == categories.first()) Green else if (categories.indexOf(item) == 1) SunYellow else Color(0xFF4D91E2),
+                            trackColor = OutlineGreen
+                        )
+                        Text(formatMoney(item.amountCents), color = PrimaryText, fontSize = 9.sp, modifier = Modifier.width(62.dp), textAlign = TextAlign.End)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun YayaLimitToggleRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(13.dp)).background(SoftGreen), contentAlignment = Alignment.Center) {
+            Text(if (title.startsWith("今天")) "日" else "铃", color = GreenDark, fontWeight = FontWeight.Black)
+        }
+        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+            Text(title, color = PrimaryText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = MutedText, fontSize = 9.sp)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
 private fun AutoListenDisabledWarningCard(onGoToListenerTab: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = SoftRed),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onGoToListenerTab),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF4C5)),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("自动监听未开启，付款不会自动记录。",  color = Red, fontWeight = FontWeight.Bold)
-            Button(modifier = Modifier.fillMaxWidth(), onClick = onGoToListenerTab) {
-                Text("去开启监听")
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.size(34.dp).clip(RoundedCornerShape(12.dp)).background(SurfaceWhite), contentAlignment = Alignment.Center) {
+                Text("!", color = Color(0xFF8A6200), fontWeight = FontWeight.Black)
             }
+            Column(Modifier.weight(1f)) {
+                Text("自动记账还没开始工作", color = Color(0xFF735400), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("先开启监听，再去付款", color = MutedText, fontSize = 9.sp)
+            }
+            Text("开启", color = Color(0xFF735400), fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1894,16 +2500,20 @@ private fun AutoListenDisabledWarningCard(onGoToListenerTab: () -> Unit) {
 @Composable
 private fun AutoListenIncompleteWarningCard(onRestoreAutoListen: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = SoftRed),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onRestoreAutoListen),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF4C5)),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("自动监听已开启，但前台服务未运行。",  color = Red, fontWeight = FontWeight.Bold)
-            Button(modifier = Modifier.fillMaxWidth(), onClick = onRestoreAutoListen) {
-                Text("立即恢复")
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.size(34.dp).clip(RoundedCornerShape(12.dp)).background(SurfaceWhite), contentAlignment = Alignment.Center) {
+                Text("!", color = Color(0xFF8A6200), fontWeight = FontWeight.Black)
             }
+            Column(Modifier.weight(1f)) {
+                Text("自动记账暂时休息了", color = Color(0xFF735400), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("账单没有丢失，点一下恢复监听", color = MutedText, fontSize = 9.sp)
+            }
+            Text("恢复", color = Color(0xFF735400), fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1914,15 +2524,27 @@ private fun PeriodExpenseCard(
     weekStats: BillStatistics,
     monthStats: BillStatistics
 ) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("统计卡片",  color = PrimaryText, fontWeight = FontWeight.Bold)
-            HealthStatusRow("今日支出", "${formatMoney(todayStats.totalExpenseCents)} / ${todayStats.expenseCount} 笔")
-            HealthStatusRow("本周支出", "${formatMoney(weekStats.totalExpenseCents)} / ${weekStats.expenseCount} 笔")
-            HealthStatusRow("本月支出", "${formatMoney(monthStats.totalExpenseCents)} / ${monthStats.expenseCount} 笔")
-            HealthStatusRow("本月收入", "${formatMoney(monthStats.totalIncomeCents)} / ${monthStats.incomeCount} 笔")
-            HealthStatusRow("结余", formatMoney(monthStats.balanceCents))
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("消费节奏", color = PrimaryText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PeriodMetric("今天", todayStats.totalExpenseCents, todayStats.expenseCount, Modifier.weight(1f))
+                PeriodMetric("本周", weekStats.totalExpenseCents, weekStats.expenseCount, Modifier.weight(1f))
+                PeriodMetric("本月", monthStats.totalExpenseCents, monthStats.expenseCount, Modifier.weight(1f))
+            }
         }
+    }
+}
+
+@Composable
+private fun PeriodMetric(label: String, amountCents: Long, count: Int, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(16.dp)).background(SoftGreen).padding(11.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = MutedText, fontSize = 12.sp)
+        Text(formatMoney(amountCents), color = GreenDark, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text("$count 笔", color = MutedText, fontSize = 11.sp)
     }
 }
 
@@ -1951,6 +2573,12 @@ private fun ListenerTabContent(
     onCopyProblemLog: () -> Unit,
     onShareProblemLog: () -> Unit
 ) {
+    val context = LocalContext.current
+    healthRefreshTick.hashCode()
+    val runtime = NotificationListenerState.current(context)
+    val autoEnabled = KeepAliveNotificationService.isEnabled(context)
+    val serviceRunning = KeepAliveNotificationService.isRunning(context)
+    val healthy = notificationAccessEnabled && autoEnabled && serviceRunning && runtime.listenerConnected
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize().padding(horizontal = 18.dp),
@@ -1958,71 +2586,110 @@ private fun ListenerTabContent(
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Text("自动监听",  color = PrimaryText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("检查通知监听、前台服务和后台稳定设置",  color = MutedText)
+            YayaPageHeader("自动监听", "先开监听，再去付款")
         }
         item {
-            ListenerStatusCard(
-                notificationAccessEnabled = notificationAccessEnabled,
-                healthRefreshTick = healthRefreshTick,
-                listenerRescueState = listenerRescueState,
-                onOpenNotificationSettings = onOpenNotificationSettings,
-                onEnableAutoListen = onEnableAutoListen,
-                onDisableAutoListen = onDisableAutoListen,
-                onRestoreAutoListen = onRestoreAutoListen,
-                onOneClickRepair = onOneClickRepair,
-                onListenerRescue = onListenerRescue
-            )
+            Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = if (healthy) SoftGreen else Color(0xFFFFF4C5))) {
+                Row(Modifier.fillMaxWidth().padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text(if (healthy) "●  监听正常" else "●  需要完成设置", color = if (healthy) Green else Color(0xFF8A6200), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(if (healthy) "自动记账正在工作" else "自动记账暂未完整运行", color = if (healthy) GreenDark else PrimaryText, fontSize = 17.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Serif)
+                        Text(
+                            if (healthy) "微信和支付宝付款通知到达后会生成待确认账单。" else "按下面三项检查权限和监听状态，已有账单不会受到影响。",
+                            color = MutedText,
+                            fontSize = 9.sp
+                        )
+                    }
+                    YayaMascot(Modifier.size(92.dp))
+                }
+            }
         }
         item {
-            ListenerPermissionGuideCard(
-                notificationAccessEnabled = notificationAccessEnabled,
-                healthRefreshTick = healthRefreshTick,
-                onOpenNotificationSettings = onOpenNotificationSettings,
-                onOpenBackgroundSettings = onOpenBackgroundSettings,
-                onRestoreAutoListen = onRestoreAutoListen,
-                onListenerRescue = onListenerRescue
-            )
+            Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+                    YayaListenerSettingRow("铃", "通知监听权限", "允许芽芽读取支付通知", notificationAccessEnabled, onOpenNotificationSettings)
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(OutlineGreen))
+                    YayaListenerSwitchRow("芽", "自动监听", "保持自动记账持续工作", autoEnabled) { if (it) onEnableAutoListen() else onDisableAutoListen() }
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(OutlineGreen))
+                    YayaListenerSettingRow("应", "监听的应用", MonitoredAppConfig.enabledSummaryForLog(context).joinToString("、").ifBlank { "暂无" }, true, onOpenMonitoredApps)
+                }
+            }
         }
+        item { YayaPrototypeSectionTitle("运行状态", "查看诊断", onOpenHealth) }
         item {
-            ProblemLogActionsCard(
-                onCopyProblemLog = onCopyProblemLog,
-                onShareProblemLog = onShareProblemLog
-            )
-        }
-        item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("监听工具", color = PrimaryText, fontWeight = FontWeight.Bold)
-                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenHealth) {
-                        Text("监听健康状态")
-                    }
-                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenBackgroundSettings) {
-                        Text("后台稳定设置")
-                    }
-                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenBackgroundReport) {
-                        Text("后台诊断报告")
-                    }
-                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenMonitoredApps) {
-                        Text("管理监听应用")
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onOpenDebugLogs) { Text("通知日志") }
-                        Button(onClick = onOpenRealNotificationTest) { Text("测试通知") }
-                    }
-                    Button(modifier = Modifier.fillMaxWidth(), onClick = onOpenWechatScanTest) {
-                        Text("微信扫码支付测试")
-                    }
-                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenWechatScanBackfill) {
-                        Text("扫码支付后补录")
-                    }
-                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = onOpenTroubleshooting) {
-                        Text("监听问题排查")
+            Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    HealthStatusRow("最近一次检查", formatOptionalDateTime(ListenerRecoveryState.snapshot(context).lastHealthCheckAt))
+                    HealthStatusRow("今天捕获通知", if (runtime.lastNotificationTime > 0L) "有记录" else "暂无")
+                    HealthStatusRow("监听连接", if (runtime.listenerConnected) "稳定" else "未连接")
+                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = if (serviceRunning) onListenerRescue else onRestoreAutoListen) {
+                        Text(if (serviceRunning) "立即检查一次" else "恢复自动监听")
                     }
                 }
             }
         }
+        item { YayaPrototypeSectionTitle("诊断与补救") }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(modifier = Modifier.weight(1f), onClick = onOneClickRepair) { Text("一键修复", fontSize = 11.sp) }
+                OutlinedButton(modifier = Modifier.weight(1f), onClick = onOpenTroubleshooting) { Text("故障排查", fontSize = 11.sp) }
+            }
+        }
+        item {
+            Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        YayaSmallToolButton("通知日志", Modifier.weight(1f), onOpenDebugLogs)
+                        YayaSmallToolButton("测试通知", Modifier.weight(1f), onOpenRealNotificationTest)
+                        YayaSmallToolButton("扫码测试", Modifier.weight(1f), onOpenWechatScanTest)
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        YayaSmallToolButton("系统设置", Modifier.weight(1f), onOpenBackgroundSettings)
+                        YayaSmallToolButton("后台报告", Modifier.weight(1f), onOpenBackgroundReport)
+                        YayaSmallToolButton("扫码补录", Modifier.weight(1f), onOpenWechatScanBackfill)
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        YayaSmallToolButton("复制日志", Modifier.weight(1f), onCopyProblemLog)
+                        YayaSmallToolButton("分享日志", Modifier.weight(1f), onShareProblemLog)
+                    }
+                }
+            }
+        }
+        if (listenerRescueState.hasResults) item {
+            Text(listenerRescueState.finalConclusion, color = if (listenerRescueState.finalConclusion == "监听恢复正常") Green else Orange, fontSize = 11.sp, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+        }
         item { Spacer(Modifier.height(84.dp)) }
+    }
+}
+
+@Composable
+private fun YayaListenerSettingRow(symbol: String, title: String, subtitle: String, enabled: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(13.dp)).background(SoftGreen), contentAlignment = Alignment.Center) { Text(symbol, color = GreenDark, fontWeight = FontWeight.Black) }
+        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+            Text(title, color = PrimaryText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = MutedText, fontSize = 8.sp, maxLines = 1)
+        }
+        Text(if (enabled) "已开启" else "去开启", color = if (enabled) Green else Orange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun YayaListenerSwitchRow(symbol: String, title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(13.dp)).background(SoftGreen), contentAlignment = Alignment.Center) { Text(symbol, color = GreenDark, fontWeight = FontWeight.Black) }
+        Column(Modifier.padding(start = 10.dp).weight(1f)) {
+            Text(title, color = PrimaryText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = MutedText, fontSize = 8.sp)
+        }
+        Switch(checked, onCheckedChange)
+    }
+}
+
+@Composable
+private fun YayaSmallToolButton(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    OutlinedButton(modifier = modifier, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 7.dp), onClick = onClick) {
+        Text(label, fontSize = 9.sp, maxLines = 1)
     }
 }
 
@@ -2031,7 +2698,7 @@ private fun ProblemLogActionsCard(
     onCopyProblemLog: () -> Unit,
     onShareProblemLog: () -> Unit
 ) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("导出问题日志", color = PrimaryText, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2082,7 +2749,7 @@ private fun ListenerPermissionGuideCard(
 
     if (!shouldGuide) return
 
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FBFF))) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF9FBFF))) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("需要手动开启系统权限", color = PrimaryText, fontWeight = FontWeight.Bold)
             Text(
@@ -2091,7 +2758,7 @@ private fun ListenerPermissionGuideCard(
                 fontSize = 13.sp
             )
             listOf(
-                "1. 通知监听权限：打开后找到本地自动记账，先关闭，等待 5 秒，再重新开启。",
+                "1. 通知监听权限：打开后找到芽芽记账，先关闭，等待 5 秒，再重新开启。",
                 "2. 应用后台设置：允许自启动、关联启动、后台活动，电池设置为不优化或不受限制。",
                 "3. 通知权限：允许本 APP、微信、支付宝通知，并允许锁屏通知和横幅通知。",
                 "4. 回到 APP 后点击恢复自动监听，再点击重新探测监听。"
@@ -2149,35 +2816,56 @@ private fun ListenerStatusCard(
             isHuaweiHonorDevice = deviceCompatInfo.isHuaweiHonorDevice
         )
     )
+    var showTechnicalDetails by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("监听健康状态",  color = PrimaryText, fontWeight = FontWeight.Bold)
-            HealthStatusRow("当前设备", deviceCompatInfo.deviceName)
-            HealthStatusRow("系统", deviceCompatInfo.systemLabel)
-            HealthStatusRow("兼容模式", deviceCompatInfo.compatibilityModeLabel)
-            HealthStatusRow("已启用监听应用", "${MonitoredAppConfig.enabledCount(context)} 个")
-            HealthStatusRow("监听应用摘要", MonitoredAppConfig.enabledSummary(context))
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                YayaMascot()
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (health.status == ListenerServiceStatus.HEALTHY) "自动记账运行正常" else "自动记账需要检查",
+                        color = if (health.status == ListenerServiceStatus.HEALTHY) GreenDark else Orange,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                    Text(
+                        if (health.status == ListenerServiceStatus.HEALTHY) "微信、支付宝付款通知正在监听" else "跟着下面的提示即可恢复",
+                        color = MutedText,
+                        fontSize = 12.sp
+                    )
+                }
+            }
             HealthStatusRow("通知监听权限", if (notificationAccessEnabled) "已授权" else "未授权")
-            HealthStatusRow("监听状态", listenerStatusLabel(health.status))
             HealthStatusRow("自动监听", if (autoEnabled) "已启用" else "未启用")
-            HealthStatusRow("前台服务", if (foregroundRunning) "运行中" else "未运行")
-            HealthStatusRow("最近健康检查", formatOptionalDateTime(recoverySnapshot.lastHealthCheckAt))
-            HealthStatusRow("最近探测成功", formatOptionalDateTime(probeSnapshot.lastSuccessTime))
-            HealthStatusRow("最近探测失败", formatOptionalDateTime(probeSnapshot.lastFailTime))
-            HealthStatusRow("最近通知", formatOptionalDateTime(runtimeState.lastNotificationTime))
-            HealthStatusRow("最近微信通知", formatOptionalDateTime(runtimeState.lastWechatNotificationTime))
-            HealthStatusRow("最近支付宝通知", formatOptionalDateTime(runtimeState.lastAlipayNotificationTime))
+            HealthStatusRow("运行状态", listenerStatusLabel(health.status))
             HealthStatusRow("最近付款通知", formatOptionalDateTime(runtimeState.lastPaymentNotificationTime))
-            HealthStatusRow("最近自动修复", formatOptionalDateTime(recoverySnapshot.lastAutoRepairAt))
-            HealthStatusRow("自动修复次数", "${recoverySnapshot.autoRepairCount}")
-            HealthStatusRow("上次重绑结果", recoverySnapshot.lastRebindResult.ifBlank { "暂无" })
-            HealthStatusRow("上次失败原因", recoverySnapshot.lastFailureReason.ifBlank { "暂无" })
+            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { showTechnicalDetails = !showTechnicalDetails }) {
+                Text(if (showTechnicalDetails) "收起详细状态" else "查看详细状态")
+            }
+            if (showTechnicalDetails) {
+                HealthStatusRow("当前设备", deviceCompatInfo.deviceName)
+                HealthStatusRow("系统", deviceCompatInfo.systemLabel)
+                HealthStatusRow("兼容模式", deviceCompatInfo.compatibilityModeLabel)
+                HealthStatusRow("已启用监听应用", "${MonitoredAppConfig.enabledCount(context)} 个")
+                HealthStatusRow("监听应用摘要", MonitoredAppConfig.enabledSummary(context))
+                HealthStatusRow("后台监听", if (foregroundRunning) "运行中" else "未运行")
+                HealthStatusRow("最近健康检查", formatOptionalDateTime(recoverySnapshot.lastHealthCheckAt))
+                HealthStatusRow("最近探测成功", formatOptionalDateTime(probeSnapshot.lastSuccessTime))
+                HealthStatusRow("最近探测失败", formatOptionalDateTime(probeSnapshot.lastFailTime))
+                HealthStatusRow("最近通知", formatOptionalDateTime(runtimeState.lastNotificationTime))
+                HealthStatusRow("最近微信通知", formatOptionalDateTime(runtimeState.lastWechatNotificationTime))
+                HealthStatusRow("最近支付宝通知", formatOptionalDateTime(runtimeState.lastAlipayNotificationTime))
+                HealthStatusRow("最近自动修复", formatOptionalDateTime(recoverySnapshot.lastAutoRepairAt))
+                HealthStatusRow("自动修复次数", "${recoverySnapshot.autoRepairCount}")
+                HealthStatusRow("上次重绑结果", recoverySnapshot.lastRebindResult.ifBlank { "暂无" })
+                HealthStatusRow("上次失败原因", recoverySnapshot.lastFailureReason.ifBlank { "暂无" })
+            }
             if (health.status != ListenerServiceStatus.HEALTHY) {
                 Text("监听状态异常，请尝试一键修复或重新授权。",  color = Orange, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
@@ -2197,7 +2885,7 @@ private fun ListenerStatusCard(
                 }
             }
             if (!autoEnabled) {
-                Text("自动监听未启用，付款不会自动记录。",  color = Red, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text("自动记账还没开始工作。", color = Orange, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Button(modifier = Modifier.fillMaxWidth().height(52.dp), onClick = onEnableAutoListen) {
                     Text("开启自动监听")
                 }
@@ -2206,7 +2894,7 @@ private fun ListenerStatusCard(
                     Text("关闭自动监听")
                 }
             } else {
-                Text("前台服务未运行，建议立即恢复。",  color = Orange, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("后台监听没有运行，建议立即恢复。", color = Orange, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Button(modifier = Modifier.fillMaxWidth(), onClick = onRestoreAutoListen) {
                     Text("恢复前台服务")
                 }
@@ -2219,7 +2907,7 @@ private fun ListenerStatusCard(
                 enabled = !listenerRescueState.running,
                 onClick = onListenerRescue
             ) {
-                Text(if (listenerRescueState.running) "修复中..." else "监听急救")
+                Text(if (listenerRescueState.running) "修复中..." else "深度修复")
             }
             if (listenerRescueState.hasResults) {
                 Text("修复结果", color = PrimaryText, fontWeight = FontWeight.SemiBold)
@@ -2246,7 +2934,7 @@ private fun VendorCompatWarning(
     onListenerRescue: () -> Unit
 ) {
     val context = LocalContext.current
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E8))) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E8))) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("荣耀 / 华为系统可能拦截了通知监听服务", color = Orange, fontWeight = FontWeight.Bold)
             Text(
@@ -2329,7 +3017,7 @@ private fun LedgerScreen(
         ) {
             item {
                 Spacer(Modifier.height(18.dp))
-                Text("本地自动记账", color = PrimaryText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text("芽芽记账", color = PrimaryText, fontSize = 28.sp, fontWeight = FontWeight.Bold)
                 Text(APP_VERSION_DISPLAY, color = MutedText)
                 Spacer(Modifier.height(16.dp))
                 SummaryCard(uiState, onOpenPending)
@@ -2360,7 +3048,7 @@ private fun LedgerScreen(
                 item { EmptyLedgerCard(onAdd) }
             } else {
                 item {
-                    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
                         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text("最近账单",  color = PrimaryText, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2382,10 +3070,27 @@ private fun LedgerScreen(
 
 @Composable
 private fun SummaryCard(uiState: BookkeepingUiState, onOpenPending: () -> Unit) {
+    val monthStats = BillStatisticsCalculator.calculate(
+        uiState.confirmedRecords,
+        BillStatisticsCalculator.rangeFor(StatsRangeType.MONTH)
+    )
+    SummaryCard(uiState, monthStats, onOpenPending)
+}
+
+@Composable
+private fun SummaryCard(
+    uiState: BookkeepingUiState,
+    monthStats: BillStatistics,
+    onOpenPending: () -> Unit
+) {
+    val todayStats = BillStatisticsCalculator.calculate(
+        uiState.confirmedRecords,
+        BillStatisticsCalculator.rangeFor(StatsRangeType.TODAY)
+    )
     Card(
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = GreenDark),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
             Row(
@@ -2393,28 +3098,42 @@ private fun SummaryCard(uiState: BookkeepingUiState, onOpenPending: () -> Unit) 
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("今日概览",  color = PrimaryText, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Column {
+                    Text("本月还可以放心花", color = Color.White.copy(alpha = 0.76f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        formatMoney(monthStats.balanceCents),
+                        color = Color.White,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 31.sp
+                    )
+                }
                 if (uiState.pendingCount > 0) {
-                    OutlinedButton(onClick = onOpenPending) {
-                        Text("待确认 ${uiState.pendingCount}")
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(SunYellow)
+                            .clickable(onClick = onOpenPending)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text("待确认 ${uiState.pendingCount}", color = Color(0xFF4D3800), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                SummaryValue("今日收入", uiState.incomeCents, Green)
-                SummaryValue("今日支出", uiState.expenseCents, Red)
-                SummaryValue("总收入", uiState.incomeCents, Green)
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                SummaryValue("本月支出", monthStats.totalExpenseCents, Modifier.weight(1f))
+                SummaryValue("本月收入", monthStats.totalIncomeCents, Modifier.weight(1f))
+                SummaryValue("今日支出", todayStats.totalExpenseCents, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun SummaryValue(label: String, amountCents: Long, color: Color) {
-    Column(horizontalAlignment = Alignment.Start) {
-        Text(label, color = MutedText, fontSize = 13.sp)
-        Text(formatMoney(amountCents), color = color, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+private fun SummaryValue(label: String, amountCents: Long, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.Start) {
+        Text(label, color = Color.White.copy(alpha = 0.66f), fontSize = 11.sp)
+        Text(formatMoney(amountCents), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
     }
 }
 
@@ -2441,8 +3160,8 @@ private fun NotificationAccessCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(
@@ -2577,8 +3296,8 @@ private fun NotificationAccessCard(
 private fun EmptyLedgerCard(onAdd: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -2597,8 +3316,8 @@ private fun ExpenseRow(record: ExpenseRecord) {
     val isIncome = record.type == TransactionType.INCOME
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Row(
@@ -2626,6 +3345,7 @@ private fun ExpenseRow(record: ExpenseRecord) {
 private fun ScreenshotPreviewScreen(
     preview: ScreenshotPreviewState,
     onBack: () -> Unit,
+    onPickAnother: () -> Unit,
     onConfirmExistingPending: (Long, Long, TransactionType, String, String, String, Long) -> Unit,
     onCreateConfirmed: (Long, TransactionType, String, String, String, Long, String, String, String, String) -> Unit
 ) {
@@ -2665,30 +3385,30 @@ private fun ScreenshotPreviewScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("统计",  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text(preview.message, color = if (preview.parseResult.bill == null) Orange else MutedText)
+            YayaSecondaryHeader("截图记账", "核对识别结果后再保存", onBack)
+        }
+        item {
+            YayaInfoBanner(
+                title = if (preview.parseResult.bill == null) "这张截图还需要你补充" else "截图识别完成",
+                message = preview.message,
+                symbol = if (preview.parseResult.bill == null) "!" else "✓",
+                warning = preview.parseResult.bill == null
+            )
         }
 
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     ScreenshotThumbnail(preview.imageUri)
-                    // repaired damaged text line
-                    // repaired damaged text line
-                    // repaired damaged text line
 
                     OutlinedTextField(
                         value = amount,
@@ -2734,9 +3454,14 @@ private fun ScreenshotPreviewScreen(
                         Text(error, color = Red, fontSize = 13.sp)
                     }
 
-                    Button(
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        onClick = {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            onClick = onPickAnother
+                        ) { Text("换张截图") }
+                        Button(
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            onClick = {
                             val amountCents = parseAmountCents(amount)
                             val paidAtMillis = parseDateMillis(dateText)
                             val sourceApp = parsed?.sourceApp ?: "截图识别"
@@ -2770,9 +3495,10 @@ private fun ScreenshotPreviewScreen(
                                     preview.imageUri
                                 )
                             }
+                            }
+                        ) {
+                            Text("确认入账")
                         }
-                    ) {
-                        Text("确认生成账单")
                     }
                 }
             }
@@ -2800,7 +3526,7 @@ private fun ScreenshotThumbnail(imageUri: String) {
         Image(
             bitmap = current.asImageBitmap(),
             contentDescription = "截图预览",
-            modifier = Modifier.fillMaxWidth().aspectRatio(1.7f).clip(RoundedCornerShape(8.dp)),
+            modifier = Modifier.fillMaxWidth().aspectRatio(1.7f).clip(RoundedCornerShape(20.dp)),
             contentScale = ContentScale.Crop
         )
     }
@@ -2816,50 +3542,70 @@ private fun RecordDetailScreen(
     var showRawText by remember(record.id) { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("账单详情", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
+            YayaSecondaryHeader("账单详情", "查看这笔账单的完整信息", onBack)
         }
         item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+                Column(
+                    Modifier.fillMaxWidth().padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     val typeLabel = when (record.type) {
                         TransactionType.INCOME -> "收入"
                         TransactionType.EXPENSE -> "支出"
                         TransactionType.UNKNOWN -> "未知"
                     }
-                    HealthStatusRow("金额", formatMoney(record.amountCents))
-                    HealthStatusRow("类型", typeLabel)
-                    HealthStatusRow("分类", record.category)
-                    HealthStatusRow("分类来源", record.categorySource.ifBlank { "未知" })
-                    if (record.matchedRuleName.isNotBlank()) {
-                        HealthStatusRow("匹配规则", record.matchedRuleName)
-                    }
-                    if (record.matchedKeyword.isNotBlank()) {
-                        HealthStatusRow("匹配关键词", record.matchedKeyword)
-                    }
+                    val isIncome = record.type == TransactionType.INCOME
+                    CategoryBubble(record.category.take(1).ifBlank { "账" }, isIncome)
+                    Text(
+                        text = formatMoney(if (isIncome) record.amountCents else -record.amountCents),
+                        color = if (isIncome) Green else Red,
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                    Text(record.merchantName.ifBlank { record.category }, color = PrimaryText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("$typeLabel · ${record.category}", color = MutedText, fontSize = 13.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     HealthStatusRow("商户", record.merchantName.ifBlank { "未知" })
                     HealthStatusRow("来源", record.sourceApp)
                     HealthStatusRow("时间", formatDateTime(record.paidAtMillis))
                     HealthStatusRow("备注", record.note.ifBlank { "无" })
-                    if (record.rawText.isNotBlank()) {
-                        OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { showRawText = !showRawText }) {
-                            Text(if (showRawText) "隐藏原始文本" else "查看原始文本")
-                        }
-                        if (showRawText) {
-                            Text(record.rawText, color = PrimaryText, fontSize = 12.sp)
+                    }
+                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { showRawText = !showRawText }) {
+                        Text(if (showRawText) "收起识别详情" else "查看识别详情")
+                    }
+                    if (showRawText) {
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(SoftGreen).padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            HealthStatusRow("分类来源", record.categorySource.ifBlank { "未知" })
+                            if (record.matchedRuleName.isNotBlank()) HealthStatusRow("匹配规则", record.matchedRuleName)
+                            if (record.matchedKeyword.isNotBlank()) HealthStatusRow("匹配关键词", record.matchedKeyword)
+                            if (record.rawText.isNotBlank()) {
+                                Text("原始通知", color = MutedText, fontSize = 12.sp)
+                                Text(record.rawText, color = PrimaryText, fontSize = 12.sp)
+                            }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onEdit) { Text("编辑") }
-                        OutlinedButton(onClick = { showDeleteConfirm = true }) { Text("删除") }
+                    YayaPageIntro(
+                        title = "分类越来越准啦",
+                        message = if (record.merchantName.isBlank()) "确认商户和分类后，芽芽会逐渐学会你的记账习惯。" else "这次确认会帮助芽芽记住“${record.merchantName}”的常用分类。"
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(modifier = Modifier.weight(1f), onClick = onEdit) { Text("编辑账单") }
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Red),
+                            onClick = { showDeleteConfirm = true }
+                        ) { Text("删除") }
                     }
                 }
             }
@@ -2895,33 +3641,27 @@ private fun PendingBillsScreen(
     onIgnore: (Long) -> Unit
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("待确认账单",  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            YayaSecondaryHeader("待确认账单", "核对芽芽自动识别出的付款通知", onBack)
+        }
+
+        if (pendingRecords.isNotEmpty()) {
+            item {
+                YayaInfoBanner(
+                    title = "找到 ${pendingRecords.size} 笔新账单",
+                    message = "金额和商户确认无误后即可入账，不确定的内容可以先编辑。",
+                    symbol = "${pendingRecords.size}"
+                )
             }
-            Text("确认或编辑自动识别出的账单",  color = MutedText)
         }
 
         if (pendingRecords.isEmpty()) {
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
-                ) {
-                    Text(
-                        "暂无待确认账单",
-                        modifier = Modifier.fillMaxWidth().padding(24.dp),
-                        color = MutedText,
-                        textAlign = TextAlign.Center
-                    )
-                }
+                YayaEmptyState("都处理好啦", "暂时没有需要确认的账单，新付款通知出现后会显示在这里。")
             }
         } else {
             items(pendingRecords, key = { it.id }) { record ->
@@ -2941,6 +3681,7 @@ private fun PendingBillRow(
 ) {
     val isIncome = record.type == TransactionType.INCOME
     val needsAmount = record.status == RecordStatus.NEED_AMOUNT
+    var showDetails by remember(record.id) { mutableStateOf(false) }
     val canQuickConfirm = !needsAmount &&
         record.type != TransactionType.UNKNOWN &&
         record.category != "待选择" &&
@@ -2952,26 +3693,22 @@ private fun PendingBillRow(
     }
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CategoryBubble(record.sourceApp.take(1), isIncome)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = if (needsAmount) "${record.sourceApp} 通知缺少金额" else "${record.sourceApp} 通知",
+                        text = record.merchantName.ifBlank { if (needsAmount) "等待补充金额" else "${record.sourceApp} 新账单" },
                         color = PrimaryText,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Text("来源：${record.sourceApp}", color = MutedText, fontSize = 13.sp)
-                    Text(
-                        "${typeText} / 置信度 ${record.confidence} / ${formatDate(record.notificationPostedAtMillis.takeIf { it > 0 } ?: record.paidAtMillis)}",
-                        color = MutedText,
-                        fontSize = 12.sp
-                    )
+                    Text("${record.sourceApp} · ${formatDate(record.notificationPostedAtMillis.takeIf { it > 0 } ?: record.paidAtMillis)}", color = MutedText, fontSize = 13.sp)
+                    Text("$typeText · ${record.category}", color = MutedText, fontSize = 12.sp)
                 }
                 Text(
                     text = if (needsAmount) "缺少金额" else formatMoney(if (isIncome) record.amountCents else -record.amountCents),
@@ -2979,30 +3716,37 @@ private fun PendingBillRow(
                     fontWeight = FontWeight.Bold
                 )
             }
-            DebugField("商户", record.merchantName.ifBlank { "未知" })
-            DebugField("分类/类型", "${record.category} / $typeText")
-            if (record.categorySource == CategoryClassifier.SOURCE_LEARNED) {
-                DebugField("推荐分类", record.category)
-                DebugField("命中商户", record.matchedKeyword.ifBlank { record.merchantName.ifBlank { "未知" } })
-                DebugField("来源", "历史学习")
+            if (record.note.isNotBlank()) Text(record.note, color = PrimaryText, fontSize = 13.sp)
+            OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { showDetails = !showDetails }) {
+                Text(if (showDetails) "收起识别依据" else "查看识别依据")
             }
-            if (record.matchedRuleName.isNotBlank()) {
-                DebugField("命中规则", record.matchedRuleName)
-            }
-            DebugField("备注", record.note.ifBlank { "无" })
-            if (record.rawText.isNotBlank()) {
-                Text("原始文本：${record.rawText.take(260)}", color = PrimaryText, fontSize = 12.sp)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (needsAmount) {
-                    Button(onClick = { onEdit(record) }) { Text("补全金额") }
-                } else if (canQuickConfirm) {
-                    Button(onClick = { onConfirm(record.id) }) { Text("确认") }
-                    OutlinedButton(onClick = { onEdit(record) }) { Text("编辑") }
-                } else {
-                    Button(onClick = { onEdit(record) }) { Text("编辑") }
+            if (showDetails) {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(SoftGreen).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    DebugField("识别置信度", record.confidence.toString())
+                    DebugField("分类来源", record.categorySource.ifBlank { "未知" })
+                    if (record.categorySource == CategoryClassifier.SOURCE_LEARNED) {
+                        DebugField("历史商户", record.matchedKeyword.ifBlank { record.merchantName.ifBlank { "未知" } })
+                    }
+                    if (record.matchedRuleName.isNotBlank()) DebugField("命中规则", record.matchedRuleName)
+                    if (record.rawText.isNotBlank()) Text("原始通知：${record.rawText.take(260)}", color = PrimaryText, fontSize = 12.sp)
                 }
-                OutlinedButton(onClick = { onIgnore(record.id) }) { Text("忽略") }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (needsAmount) {
+                    Button(modifier = Modifier.weight(1f), onClick = { onEdit(record) }) { Text("补全金额") }
+                } else if (canQuickConfirm) {
+                    Button(modifier = Modifier.weight(1f), onClick = { onConfirm(record.id) }) { Text("确认入账") }
+                    OutlinedButton(modifier = Modifier.weight(1f), onClick = { onEdit(record) }) { Text("编辑") }
+                } else {
+                    Button(modifier = Modifier.weight(1f), onClick = { onEdit(record) }) { Text("编辑") }
+                }
+                OutlinedButton(
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Red),
+                    onClick = { onIgnore(record.id) }
+                ) { Text("忽略") }
             }
         }
     }
@@ -3021,27 +3765,46 @@ private fun ListenerHealthScreen(
     onOpenBatterySettings: () -> Unit,
     onToggleAutoListening: (Boolean) -> Unit
 ) {
+    var showTechnicalDetails by remember { mutableStateOf(false) }
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("监听健康状态",  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            if (!health.listenerServiceActive) {
-                Text("监听疑似失效，请检查权限和前台服务。",  color = Orange, fontWeight = FontWeight.SemiBold)
-            }
+            YayaSecondaryHeader("监听健康", "先看结论，需要时再展开技术详情", onBack)
         }
 
         item {
+            YayaInfoBanner(
+                title = if (health.listenerServiceActive) "自动记账运行正常" else "监听需要检查",
+                message = if (health.listenerServiceActive) "通知权限、监听连接和后台服务目前可用。" else "账单数据没有丢失，可以使用下方的一键修复。",
+                symbol = if (health.listenerServiceActive) "✓" else "!",
+                warning = !health.listenerServiceActive
+            )
+        }
+
+        item {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    YayaSectionTitle("关键状态")
+                    HealthStatusRow("通知监听权限", health.notificationListenerPermission)
+                    HealthStatusRow("监听状态", health.listenerServiceStatus)
+                    HealthStatusRow("后台运行", health.backgroundRunStatus)
+                    HealthStatusRow("最近付款通知", health.lastPaymentNotificationAt)
+                    OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { showTechnicalDetails = !showTechnicalDetails }) {
+                        Text(if (showTechnicalDetails) "收起技术详情" else "查看技术详情")
+                    }
+                }
+            }
+        }
+
+        if (showTechnicalDetails) {
+        item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -3080,10 +3843,11 @@ private fun ListenerHealthScreen(
                 }
             }
         }
+        }
 
         if (health.vendorBlocked) {
             item {
-                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E8))) {
+                Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E8))) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("荣耀 / 华为系统可能拦截了通知监听服务", color = Orange, fontWeight = FontWeight.Bold)
                         Text("当前权限看起来已开启，但系统没有真正连接通知监听服务。请重新授权通知监听，并检查后台运行权限。", color = PrimaryText, fontSize = 13.sp)
@@ -3096,8 +3860,8 @@ private fun ListenerHealthScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -3164,7 +3928,7 @@ private fun StatisticsScreen(
     modifier: Modifier = Modifier,
     showBack: Boolean = true
 ) {
-    var rangeType by remember { mutableStateOf(StatsRangeType.TODAY) }
+    var rangeType by remember { mutableStateOf(StatsRangeType.MONTH) }
     var groupType by remember { mutableStateOf(BillGroupType.DAY) }
     var customStart by remember { mutableStateOf(formatDate(System.currentTimeMillis())) }
     var customEnd by remember { mutableStateOf(formatDate(System.currentTimeMillis())) }
@@ -3176,91 +3940,153 @@ private fun StatisticsScreen(
         customEndMillis = customEndMillis
     )
     val stats = BillStatisticsCalculator.calculate(records, range, groupType)
-    val weekArchives = BillStatisticsCalculator.monthWeekArchives(records)
-    val monthArchives = BillStatisticsCalculator.yearMonthArchives(records)
-
+    val weekArchives = remember(records) { BillStatisticsCalculator.monthWeekArchives(records) }
+    val monthArchives = remember(records) { BillStatisticsCalculator.yearMonthArchives(records) }
     LazyColumn(
         modifier = modifier.fillMaxSize().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (showBack) {
-                    TextButtonLike("返回", onBack)
-                    Spacer(Modifier.width(12.dp))
-                }
-                Text("统计",  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
+            if (showBack) YayaSecondaryHeader("统计", "每一笔都算得明明白白", onBack)
+            else YayaPageHeader("统计", "每一笔都算得明明白白")
         }
         item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatsRangeButton("今日", rangeType == StatsRangeType.TODAY) { rangeType = StatsRangeType.TODAY }
-                        StatsRangeButton("本周", rangeType == StatsRangeType.WEEK) { rangeType = StatsRangeType.WEEK }
-                        StatsRangeButton("本月", rangeType == StatsRangeType.MONTH) { rangeType = StatsRangeType.MONTH }
-                        StatsRangeButton("自定义", rangeType == StatsRangeType.CUSTOM) { rangeType = StatsRangeType.CUSTOM }
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(SoftGreen).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                YayaStatsSegment("今日", rangeType == StatsRangeType.TODAY, Modifier.weight(1f)) { rangeType = StatsRangeType.TODAY }
+                YayaStatsSegment("本周", rangeType == StatsRangeType.WEEK, Modifier.weight(1f)) { rangeType = StatsRangeType.WEEK }
+                YayaStatsSegment("本月", rangeType == StatsRangeType.MONTH, Modifier.weight(1f)) { rangeType = StatsRangeType.MONTH }
+                YayaStatsSegment("自定义", rangeType == StatsRangeType.CUSTOM, Modifier.weight(1f)) { rangeType = StatsRangeType.CUSTOM }
+            }
+        }
+        if (rangeType == StatsRangeType.CUSTOM) {
+            item {
+                Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(customStart, { customStart = it }, Modifier.weight(1f), label = { Text("开始日期") }, singleLine = true)
+                        OutlinedTextField(customEnd, { customEnd = it }, Modifier.weight(1f), label = { Text("结束日期") }, singleLine = true)
                     }
-                    if (rangeType == StatsRangeType.CUSTOM) {
-                        OutlinedTextField(customStart, { customStart = it }, label = { Text("开始日期") }, singleLine = true)
-                        OutlinedTextField(customEnd, { customEnd = it }, label = { Text("结束日期") }, singleLine = true)
-                    }
-                    Text("范围：${stats.range.label}", color = MutedText, fontSize = 13.sp)
                 }
             }
         }
-        when (rangeType) {
-            StatsRangeType.WEEK -> {
-                if (weekArchives.isEmpty()) {
-                    item { EmptyStatsCard("暂无周统计数据") }
-                } else {
-                    items(weekArchives, key = { it.label }) { archive ->
-                        ArchivePeriodCard(archive)
-                    }
-                }
-            }
-            StatsRangeType.MONTH -> {
-                if (monthArchives.isEmpty()) {
-                    item { EmptyStatsCard("暂无月度统计数据") }
-                } else {
-                    items(monthArchives, key = { it.label }) { archive ->
-                        ArchivePeriodCard(archive)
-                    }
-                }
-            }
-            else -> {
-                item { StatisticsSummaryCard(stats) }
-                item { SummaryListCard("分类汇总", stats.categoryItems, "暂无分类统计") }
-                item { SummaryListCard("来源汇总", stats.sourceItems, "暂无来源统计") }
-                item {
-                    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("账单分组", color = PrimaryText, fontWeight = FontWeight.Bold)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                StatsRangeButton("按天", groupType == BillGroupType.DAY) { groupType = BillGroupType.DAY }
-                                StatsRangeButton("按周", groupType == BillGroupType.WEEK) { groupType = BillGroupType.WEEK }
-                                StatsRangeButton("按月", groupType == BillGroupType.MONTH) { groupType = BillGroupType.MONTH }
-                            }
-                        }
-                    }
-                }
-                if (stats.groups.isEmpty()) {
-                    item { EmptyStatsCard(if (rangeType == StatsRangeType.TODAY) "今日暂无账单" else "暂无数据") }
-                } else {
-                    items(stats.groups, key = { it.label }) { group ->
-                        BillGroupCard(group)
-                    }
-                }
-            }
+        item { YayaStatsOverview(stats) }
+        item { YayaPrototypeSectionTitle("支出趋势", "按${if (groupType == BillGroupType.DAY) "天" else if (groupType == BillGroupType.WEEK) "周" else "月"}") { groupType = if (groupType == BillGroupType.DAY) BillGroupType.WEEK else BillGroupType.DAY } }
+        item { YayaSpendingTrend(stats) }
+        item { YayaPrototypeSectionTitle("钱花在哪里", if (stats.categoryItems.isEmpty()) "暂无数据" else "${stats.categoryItems.size} 类") }
+        item { YayaCategoryDonut(stats) }
+        item { YayaPrototypeSectionTitle("账单来自哪里", if (stats.sourceItems.isEmpty()) "暂无数据" else "${stats.sourceItems.size} 个来源") }
+        item { SummaryListCard("来源统计", stats.sourceItems, "暂无来源统计") }
+        if (rangeType == StatsRangeType.WEEK && weekArchives.isNotEmpty()) {
+            item { YayaPrototypeSectionTitle("有记录的周", "${weekArchives.size} 周") }
+            items(weekArchives, key = { "week-${it.label}" }) { archive -> ArchivePeriodCard(archive) }
+        }
+        if (rangeType == StatsRangeType.MONTH && monthArchives.isNotEmpty()) {
+            item { YayaPrototypeSectionTitle("有记录的月份", "${monthArchives.size} 月") }
+            items(monthArchives, key = { "month-${it.label}" }) { archive -> ArchivePeriodCard(archive) }
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
 @Composable
+private fun YayaStatsSegment(label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier.clip(RoundedCornerShape(13.dp)).background(if (selected) SurfaceWhite else Color.Transparent)
+            .clickable(onClick = onClick).padding(vertical = 9.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = if (selected) GreenDark else MutedText, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun YayaStatsOverview(stats: BillStatistics) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        YayaMetricCard("本期支出", formatMoney(stats.totalExpenseCents), Red, Modifier.weight(1f))
+        YayaMetricCard("本期收入", formatMoney(stats.totalIncomeCents), Green, Modifier.weight(1f))
+        YayaMetricCard("结余", formatMoney(stats.balanceCents), PrimaryText, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun YayaMetricCard(label: String, value: String, valueColor: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.clip(RoundedCornerShape(18.dp)).background(SurfaceWhite).border(1.dp, OutlineGreen, RoundedCornerShape(18.dp))
+            .padding(horizontal = 8.dp, vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(label, color = MutedText, fontSize = 9.sp)
+        Text(value, color = valueColor, fontSize = 13.sp, fontWeight = FontWeight.Black, maxLines = 1)
+    }
+}
+
+@Composable
+private fun YayaSpendingTrend(stats: BillStatistics) {
+    val groups = stats.groups.take(6).reversed()
+    val maxAmount = groups.maxOfOrNull { maxOf(it.expenseCents, it.incomeCents) }?.coerceAtLeast(1L) ?: 1L
+    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+        if (groups.isEmpty()) {
+            Text("这段时间还没有账单", Modifier.fillMaxWidth().padding(34.dp), color = MutedText, textAlign = TextAlign.Center)
+        } else {
+            Row(
+                Modifier.fillMaxWidth().height(170.dp).padding(horizontal = 16.dp, vertical = 18.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                groups.forEach { group ->
+                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Row(Modifier.height(112.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Box(Modifier.width(9.dp).height((104f * group.expenseCents.toFloat() / maxAmount.toFloat()).coerceAtLeast(3f).dp).clip(RoundedCornerShape(5.dp)).background(Red))
+                            Box(Modifier.width(9.dp).height((104f * group.incomeCents.toFloat() / maxAmount.toFloat()).coerceAtLeast(3f).dp).clip(RoundedCornerShape(5.dp)).background(GreenLight))
+                        }
+                        Text(group.label.takeLast(5), color = MutedText, fontSize = 8.sp, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun YayaCategoryDonut(stats: BillStatistics) {
+    val colors = listOf(Green, SunYellow, Color(0xFF4D91E2), Red, GreenLight, Orange)
+    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+        if (stats.categoryItems.isEmpty()) {
+            Text("还没有可分析的支出", Modifier.fillMaxWidth().padding(34.dp), color = MutedText, textAlign = TextAlign.Center)
+        } else {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(122.dp), contentAlignment = Alignment.Center) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        var start = -90f
+                        stats.categoryItems.take(6).forEachIndexed { index, item ->
+                            val sweep = (item.percent * 360f).toFloat()
+                            drawArc(colors[index % colors.size], start, sweep, false, style = Stroke(width = 20.dp.toPx(), cap = StrokeCap.Butt))
+                            start += sweep
+                        }
+                    }
+                    Text(formatMoney(stats.totalExpenseCents), color = PrimaryText, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                }
+                Spacer(Modifier.width(18.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    stats.categoryItems.take(6).forEachIndexed { index, item ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(colors[index % colors.size]))
+                            Text(item.label, Modifier.padding(start = 7.dp).weight(1f), color = MutedText, fontSize = 10.sp)
+                            Text("${(item.percent * 100).toInt()}%", color = PrimaryText, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun EmptyStatsCard(text: String) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
         Text(
             text = text,
             modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -3271,17 +4097,30 @@ private fun EmptyStatsCard(text: String) {
 }
 
 @Composable
-private fun StatsRangeButton(text: String, selected: Boolean, onClick: () -> Unit) {
+private fun StatsRangeButton(
+    text: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
     if (selected) {
-        Button(onClick = onClick) { Text(text) }
+        Button(
+            modifier = modifier,
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+            onClick = onClick
+        ) { Text(text, maxLines = 1) }
     } else {
-        OutlinedButton(onClick = onClick) { Text(text) }
+        OutlinedButton(
+            modifier = modifier,
+            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+            onClick = onClick
+        ) { Text(text, maxLines = 1) }
     }
 }
 
 @Composable
 private fun StatisticsSummaryCard(stats: BillStatistics) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("统计概览", color = PrimaryText, fontWeight = FontWeight.Bold)
             HealthStatusRow("总收入", formatMoney(stats.totalIncomeCents))
@@ -3300,7 +4139,7 @@ private fun ArchivePeriodCard(archive: com.localbookkeeping.app.stats.ArchivePer
     var expanded by remember(archive.label) { mutableStateOf(false) }
     val stats = archive.statistics
     val totalCount = stats.expenseCount + stats.incomeCount
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
@@ -3339,7 +4178,7 @@ private fun SummaryListCard(
     items: List<com.localbookkeeping.app.stats.SummaryItem>,
     emptyText: String = "暂无数据"
 ) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, color = PrimaryText, fontWeight = FontWeight.Bold)
             if (items.isEmpty()) {
@@ -3358,7 +4197,7 @@ private fun BillGroupCard(
     group: com.localbookkeeping.app.stats.BillGroup,
     onRecordClick: ((ExpenseRecord) -> Unit)? = null
 ) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(group.label, color = PrimaryText, fontWeight = FontWeight.Bold)
             group.records.forEach { record ->
@@ -3392,20 +4231,49 @@ private fun BackgroundSettingsScreen(
     onOpenAppSettings: () -> Unit,
     onToggleAutoListening: (Boolean) -> Unit
 ) {
+    val context = LocalContext.current
+    var monitoredApps by remember { mutableStateOf(MonitoredAppConfig.installedApps(context)) }
+
+    fun updateMonitoredApp(app: MonitoredAppInfo, enabled: Boolean) {
+        MonitoredAppConfig.setEnabled(context, app.packageName, app.appName, enabled)
+        monitoredApps = MonitoredAppConfig.installedApps(context)
+    }
+
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("后台稳定设置",  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
+            YayaSecondaryHeader("设置与监控", "管理监听应用和后台运行建议", onBack)
         }
         item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            YayaPrototypeSectionTitle("监听的应用", "刷新列表") { monitoredApps = MonitoredAppConfig.installedApps(context) }
+        }
+        item {
+            Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+                    if (monitoredApps.isEmpty()) {
+                        Text("没有发现可监听的支付应用", Modifier.fillMaxWidth().padding(vertical = 22.dp), color = MutedText, textAlign = TextAlign.Center)
+                    } else {
+                        monitoredApps.take(5).forEachIndexed { index, app ->
+                            Row(Modifier.fillMaxWidth().padding(vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                                AppIcon(app.packageName, app.appName)
+                                Column(Modifier.padding(start = 10.dp).weight(1f)) {
+                                    Text(app.appName, color = PrimaryText, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(app.packageName, color = MutedText, fontSize = 8.sp, maxLines = 1)
+                                }
+                                Switch(app.enabled, { updateMonitoredApp(app, it) })
+                            }
+                            if (index < minOf(4, monitoredApps.lastIndex)) Box(Modifier.fillMaxWidth().height(1.dp).background(OutlineGreen))
+                        }
+                    }
+                }
+            }
+        }
+        item { YayaPrototypeSectionTitle("后台运行建议") }
+        item {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -3433,13 +4301,13 @@ private fun BackgroundSettingsScreen(
             }
         }
         item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("建议检查",  color = PrimaryText, fontWeight = FontWeight.Bold)
                     listOf(
-                        "系统设置 > 应用 > 本地自动记账 > 通知权限：允许",
-                        "系统设置 > 电池 > 本地自动记账：不限制",
-                        "通知监听权限中确认本地自动记账已开启",
+                        "系统设置 > 应用 > 芽芽记账 > 通知权限：允许",
+                        "系统设置 > 电池 > 芽芽记账：不限制",
+                        "通知监听权限中确认芽芽记账已开启",
                         "微信/支付宝通知权限中确认付款通知已开启",
                         "若系统清理后台，请将本应用加入白名单",
                         "开启自动监听后保持前台服务通知",
@@ -3450,7 +4318,7 @@ private fun BackgroundSettingsScreen(
         }
         if (health.isHuaweiHonorDevice) {
             item {
-                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("荣耀 / 华为 / HarmonyOS 用户请检查", color = PrimaryText, fontWeight = FontWeight.Bold)
                         listOf(
@@ -3462,6 +4330,16 @@ private fun BackgroundSettingsScreen(
                             "设置 > 通知使用权 / 通知访问权限：关闭本 APP 权限，等待 5 秒后重新开启。"
                         ).forEach { Text(it, color = MutedText, fontSize = 13.sp) }
                     }
+                }
+            }
+        }
+        item { YayaPrototypeSectionTitle("关于") }
+        item {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    HealthStatusRow("版本", APP_VERSION_DISPLAY)
+                    HealthStatusRow("数据位置", "仅本机")
+                    HealthStatusRow("最近健康检查", health.lastHealthCheckAt)
                 }
             }
         }
@@ -3491,20 +4369,22 @@ private fun MonitoredAppsScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("监听应用管理", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("选择哪些 APP 的通知参与自动记账识别。微信和支付宝默认启用。", color = MutedText, fontSize = 13.sp)
+            YayaSecondaryHeader("监听应用", "选择哪些 APP 的付款通知参与自动记账", onBack)
         }
         item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            YayaInfoBanner(
+                title = "只监听你选择的应用",
+                message = "微信和支付宝默认推荐，关闭后对应付款不会自动生成账单。",
+                symbol = "听"
+            )
+        }
+        item {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("当前已启用", color = PrimaryText, fontWeight = FontWeight.Bold)
                     HealthStatusRow("启用数量", "${apps.count { it.enabled }} 个")
@@ -3515,28 +4395,20 @@ private fun MonitoredAppsScreen(
                 }
             }
         }
-        item {
-            Text("推荐支付应用", color = PrimaryText, fontWeight = FontWeight.Bold)
-        }
+        item { YayaSectionTitle("推荐支付应用", "常见付款通知识别更稳定") }
         if (recommendedApps.isEmpty()) {
             item {
-                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                    Text("未发现推荐支付应用", modifier = Modifier.fillMaxWidth().padding(14.dp), color = MutedText)
-                }
+                YayaEmptyState("没有发现推荐应用", "安装微信或支付宝后，回到这里即可开启监听。")
             }
         } else {
             items(recommendedApps, key = { "recommended-${it.packageName}" }) { app ->
                 MonitoredAppRow(app = app, onEnabledChange = { setEnabled(app, it) })
             }
         }
-        item {
-            Text("全部应用", color = PrimaryText, fontWeight = FontWeight.Bold)
-        }
+        item { YayaSectionTitle("其他应用", "仅在确实需要识别时开启") }
         if (otherApps.isEmpty()) {
             item {
-                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                    Text("暂无可选择应用", modifier = Modifier.fillMaxWidth().padding(14.dp), color = MutedText)
-                }
+                YayaEmptyState("没有其他可选应用", "当前设备上没有可加入监听列表的其他应用。")
             }
         } else {
             items(otherApps, key = { "all-${it.packageName}" }) { app ->
@@ -3552,7 +4424,7 @@ private fun MonitoredAppRow(
     app: MonitoredAppInfo,
     onEnabledChange: (Boolean) -> Unit
 ) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -3586,7 +4458,7 @@ private fun AppIcon(packageName: String, appName: String) {
         Image(
             bitmap = image,
             contentDescription = appName,
-            modifier = Modifier.size(42.dp).clip(RoundedCornerShape(8.dp))
+            modifier = Modifier.size(42.dp).clip(RoundedCornerShape(20.dp))
         )
     } else {
         Box(
@@ -3623,17 +4495,20 @@ private fun BackgroundReportScreen(
         recoverySnapshot = ListenerRecoveryState.snapshot(LocalContext.current)
     )
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("后台诊断报告",  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("近 24 小时后台稳定性、通知监听和自动记账诊断。",  color = MutedText)
+            YayaSecondaryHeader("后台诊断报告", "近 24 小时的自动记账运行记录", onBack)
+        }
+        item {
+            YayaInfoBanner(
+                title = if (report.paymentParseFailCount == 0) "最近运行情况良好" else "发现 ${report.paymentParseFailCount} 次解析失败",
+                message = "问题日志可以复制或分享，账单数据不会包含在分享内容之外。",
+                symbol = if (report.paymentParseFailCount == 0) "✓" else "!",
+                warning = report.paymentParseFailCount > 0
+            )
         }
         item {
             ProblemLogActionsCard(
@@ -3642,7 +4517,7 @@ private fun BackgroundReportScreen(
             )
         }
         item {
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     HealthStatusRow("deviceBrand", report.deviceBrand)
                     HealthStatusRow("manufacturer", report.manufacturer)
@@ -3695,7 +4570,7 @@ private fun BackgroundReportScreen(
         item {
             val failures = report.failureReasons.entries
                 .sortedByDescending { it.value }
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("失败原因统计",  color = PrimaryText, fontWeight = FontWeight.Bold)
                     if (failures.isEmpty()) {
@@ -3707,7 +4582,7 @@ private fun BackgroundReportScreen(
             }
         }
         items(recentLogs.take(50), key = { it.id }) { log ->
-            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+            Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
                 Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(log.eventType, color = PrimaryText, fontWeight = FontWeight.SemiBold)
                     Text(formatDateTime(log.createdAtMillis), color = MutedText, fontSize = 12.sp)
@@ -3729,17 +4604,19 @@ private fun PaymentTroubleshootingScreen(
     onOpenQuickBackfill: () -> Unit
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("监听问题排查", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("按步骤检查通知权限、后台设置和付款通知捕获。",  color = MutedText)
+            YayaSecondaryHeader("没有自动记账？", "跟着步骤检查，通常几分钟就能恢复", onBack)
+        }
+        item {
+            YayaInfoBanner(
+                title = "先确认付款应用发出了通知",
+                message = "如果微信或支付宝没有显示付款通知，芽芽也无法自动识别。",
+                symbol = "1"
+            )
         }
 
         item {
@@ -3754,15 +4631,15 @@ private fun PaymentTroubleshootingScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("排查建议",  color = PrimaryText, fontWeight = FontWeight.SemiBold)
                     Text("确保微信和支付宝允许显示付款通知。",  color = MutedText, fontSize = 13.sp)
                     Text("确保本应用通知监听权限已开启。",  color = MutedText, fontSize = 13.sp)
-                    Text("路径：系统设置 > 通知 > 通知监听 > 本地自动记账", color = MutedText, fontSize = 13.sp)
+                    Text("路径：系统设置 > 通知 > 通知监听 > 芽芽记账", color = MutedText, fontSize = 13.sp)
                     Text("如果付款通知仍未捕获，可使用截图记账或补录。",  color = Orange, fontSize = 13.sp)
                 }
             }
@@ -3771,8 +4648,8 @@ private fun PaymentTroubleshootingScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3837,17 +4714,15 @@ private fun RealNotificationTestScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("真实通知测试",  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("用于验证通知监听是否能收到 App、微信和支付宝通知。",  color = MutedText)
+            YayaSecondaryHeader("通知测试", "验证芽芽能否收到微信和支付宝通知", onBack)
+        }
+        item {
+            YayaInfoBanner("测试不会创建真实消费", "按页面步骤发送测试通知或完成一笔付款即可。", "测")
         }
 
         item {
@@ -3918,8 +4793,8 @@ private fun RealNotificationTestScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -3959,8 +4834,8 @@ private fun RealNotificationTestScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3999,24 +4874,22 @@ private fun WechatScanPaymentTestScreen(
     val conclusion = wechatScanTestConclusion(testStartTime, active, windowLogs)
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("微信扫码支付测试", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("开始后请在 2 分钟内完成一笔微信扫码支付，页面会记录所有微信通知和金额解析诊断。", color = MutedText)
+            YayaSecondaryHeader("微信扫码支付测试", "验证扫码付款后是否能自动生成账单", onBack)
+        }
+        item {
+            YayaInfoBanner("测试窗口为 2 分钟", "开始后完成一笔微信扫码支付，芽芽会自动检查通知和金额。", "2")
         }
 
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -4043,7 +4916,7 @@ private fun WechatScanPaymentTestScreen(
 
         if (windowLogs.isEmpty() && testStartTime != null && !active) {
             item {
-                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = SoftRed)) {
+                Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SoftRed)) {
                     Text(
                         "微信扫码支付没有产生可监听通知，APP 无法自动读取，需要使用快捷补录。",
                         modifier = Modifier.fillMaxWidth().padding(14.dp),
@@ -4066,8 +4939,8 @@ private fun WechatScanPaymentTestScreen(
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4100,7 +4973,7 @@ private fun WechatScanDiagnosticCard(log: DebugNotificationLog, onOpenLogDetail:
 
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onOpenLogDetail(log) },
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = PageBackground)
     ) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -4140,8 +5013,8 @@ private fun DiagnosticStepCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -4172,7 +5045,7 @@ private fun NotificationWindowSummary(startTime: Long?, now: Long, windowMillis:
 private fun CapturedNotificationCard(log: DebugNotificationLog, onOpenLogDetail: (DebugNotificationLog) -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onOpenLogDetail(log) },
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = PageBackground)
     ) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -4210,22 +5083,26 @@ private fun NotificationRawTextDetailScreen(
     }
     val diagnostics = parseResult.diagnostics
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("通知详情", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
+            YayaSecondaryHeader("通知识别详情", "用于排查金额、商户和分类识别依据", onBack)
+        }
+        item {
+            YayaInfoBanner(
+                title = if (log.pendingCreated) "已生成待确认账单" else "尚未生成账单",
+                message = "下面内容来自本机通知解析，仅用于诊断。",
+                symbol = if (log.pendingCreated) "✓" else "!",
+                warning = !log.pendingCreated
+            )
         }
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4296,8 +5173,8 @@ private fun TroubleshootingStep(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("$step. $title", color = PrimaryText, fontWeight = FontWeight.SemiBold)
@@ -4344,23 +5221,26 @@ private fun QuickBackfillScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text(preset.title,  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
+            YayaSecondaryHeader(preset.title, "补上没有自动生成的付款记录", onBack)
+        }
+        item {
+            YayaInfoBanner(
+                title = "补录不会产生重复通知",
+                message = "填写金额和商户后会直接保存为已确认账单。",
+                symbol = "+"
+            )
         }
 
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White)
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
@@ -4438,6 +5318,7 @@ private fun ClassificationRulesScreen(
     onDeleteRule: (ClassificationRule) -> Unit
 ) {
     var editingRule by remember { mutableStateOf<ClassificationRule?>(null) }
+    var showEditor by remember { mutableStateOf(false) }
     var ruleName by remember { mutableStateOf("") }
     var keyword by remember { mutableStateOf("") }
     var type by remember { mutableStateOf(TransactionType.EXPENSE) }
@@ -4462,6 +5343,7 @@ private fun ClassificationRulesScreen(
 
     fun resetForm() {
         editingRule = null
+        showEditor = false
         ruleName = ""
         keyword = ""
         type = TransactionType.EXPENSE
@@ -4471,24 +5353,34 @@ private fun ClassificationRulesScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("分类规则", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("通知内容命中关键词后，会自动填入分类和收支类型。",  color = MutedText)
+            YayaSecondaryHeader("分类规则", "用关键词让自动分类更准确", onBack)
+        }
+        item {
+            YayaPageIntro(
+                title = "芽芽会优先使用你的规则",
+                message = "付款通知里出现关键词时，账单会自动进入对应分类。"
+            )
         }
 
         item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("已启用规则 · ${rules.count { it.enabled }}", color = PrimaryText, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("共 ${rules.size} 条", color = MutedText, fontSize = 10.sp)
+                }
+                Text("＋ 新建", modifier = Modifier.clickable { showEditor = true }, color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        if (showEditor || editingRule != null) item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -4576,18 +5468,7 @@ private fun ClassificationRulesScreen(
 
         if (rules.isEmpty()) {
             item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
-                ) {
-                    Text(
-                        "暂无分类规则",
-                        modifier = Modifier.fillMaxWidth().padding(24.dp),
-                        color = MutedText,
-                        textAlign = TextAlign.Center
-                    )
-                }
+                YayaEmptyState("还没有分类规则", "例如设置“咖啡 → 餐饮”，以后同类账单就能自动归类。")
             }
         } else {
             items(rules, key = { it.id }) { rule ->
@@ -4596,6 +5477,7 @@ private fun ClassificationRulesScreen(
                     onToggleRule = onToggleRule,
                     onEdit = {
                         editingRule = it
+                        showEditor = true
                         ruleName = it.ruleName
                         keyword = it.keyword
                         type = it.type
@@ -4620,8 +5502,8 @@ private fun ClassificationRuleRow(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -4640,11 +5522,15 @@ private fun ClassificationRuleRow(
                     onCheckedChange = { onToggleRule(rule, it) }
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onEdit(rule) }) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(modifier = Modifier.weight(1f), onClick = { onEdit(rule) }) {
                     Text("编辑")
                 }
-                OutlinedButton(onClick = { onDeleteRule(rule) }) {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Red),
+                    onClick = { onDeleteRule(rule) }
+                ) {
                     Text("删除")
                 }
             }
@@ -4668,24 +5554,22 @@ private fun NotificationDebugLogsScreen(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("通知日志",  color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("最近 100 条通知会记录在 debug_notification_logs 表。",  color = MutedText)
+            YayaSecondaryHeader("通知日志", "查看最近的通知识别结果和失败原因", onBack)
+        }
+        item {
+            YayaInfoBanner("日志只保存在本机", "最多显示最近 100 条，可用于检查自动记账为什么没有触发。", "志")
         }
 
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -4743,8 +5627,8 @@ private fun NotificationDebugLogsScreen(
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
                 ) {
                     Text(
                         "暂无通知日志",
@@ -4796,8 +5680,8 @@ private fun DebugFilterButton(label: String, selected: Boolean, onClick: () -> U
 private fun NotificationDebugLogRow(log: DebugNotificationLog) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -4861,7 +5745,7 @@ private fun parseStatusColor(parseStatus: String): Color = when {
     else -> Red
 }
 
-private fun yesNo(value: Boolean): String = if (value) "?" else "?"
+private fun yesNo(value: Boolean): String = if (value) "是" else "否"
 
 private fun transactionTypeLabel(type: TransactionType): String = when (type) {
     TransactionType.INCOME -> "收入"
@@ -4921,113 +5805,114 @@ private fun RecordFormScreen(
         TransactionType.UNKNOWN -> listOf("待选择") + ExpenseCategories.expense + ExpenseCategories.income
     }
     val categories = (listOf(category) + defaultCategories).distinct()
-    val merchantSuggestions = remember(merchantName, merchantLearnings) {
-        MerchantLearningMatcher.candidates(merchantName, merchantLearnings, limit = 4)
-    }
-
     LaunchedEffect(type) {
         if (category !in defaultCategories) category = defaultCategories.first()
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButtonLike("返回", onBack)
-            Spacer(Modifier.width(12.dp))
-            Text(title, color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        item {
+            Spacer(Modifier.height(10.dp))
+            YayaSecondaryHeader(title, if (initialRecord == null) "数据只保存在本机" else "修改后会保留原有账单记录", onBack)
         }
-
-        Card(
-            shape = RoundedCornerShape(8.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
-        ) {
-            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                OutlinedTextField(
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 76.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFFE8EEE3)).padding(4.dp)
+            ) {
+                YayaSegmentedChoice("支出", type == TransactionType.EXPENSE, Modifier.weight(1f)) { type = TransactionType.EXPENSE }
+                YayaSegmentedChoice("收入", type == TransactionType.INCOME, Modifier.weight(1f)) { type = TransactionType.INCOME }
+            }
+        }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("¥", color = MutedText, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(6.dp))
+                BasicTextField(
                     value = amount,
                     onValueChange = { amount = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("金额") },
+                    modifier = Modifier.width(190.dp),
+                    textStyle = TextStyle(color = PrimaryText, fontSize = 37.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center),
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                )
-
-                Text("类型",  color = PrimaryText, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TypeChoice("支出", TransactionType.EXPENSE, type) { type = it }
-                    TypeChoice("收入", TransactionType.INCOME, type) { type = it }
-                }
-                if (type == TransactionType.UNKNOWN) {
-                    Text("请选择收入或支出",  color = Orange, fontSize = 13.sp)
-                }
-
-                CategoryDropdown(
-                    category = category,
-                    categories = categories,
-                    onCategoryChange = { category = it }
-                )
-
-                OutlinedTextField(
-                    value = merchantName,
-                    onValueChange = { merchantName = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("商户") },
-                    singleLine = true
-                )
-                if (merchantSuggestions.isNotEmpty()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("历史商户", color = MutedText, fontSize = 13.sp)
-                        merchantSuggestions.forEach { learning ->
-                            OutlinedButton(
-                                modifier = Modifier.fillMaxWidth(),
-                                onClick = {
-                                    merchantName = learning.merchantDisplayName
-                                    category = learning.category
-                                    if (type == TransactionType.UNKNOWN) type = TransactionType.EXPENSE
-                                }
-                            ) {
-                                Text("${learning.merchantDisplayName} → ${learning.category}")
-                            }
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    decorationBox = { field ->
+                        Box(contentAlignment = Alignment.Center) {
+                            if (amount.isBlank()) Text("0.00", color = OutlineGreen, fontSize = 37.sp, fontWeight = FontWeight.Black)
+                            field()
                         }
                     }
-                }
-
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("备注") },
-                    singleLine = true
                 )
-
-                OutlinedTextField(
-                    value = dateText,
-                    onValueChange = { dateText = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("日期 yyyy-MM-dd") },
-                    singleLine = true
-                )
-
-                if (error.isNotBlank()) {
-                    Text(error, color = Red, fontSize = 13.sp)
+            }
+        }
+        item {
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
+                border = androidx.compose.foundation.BorderStroke(1.dp, OutlineGreen)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("分类", color = MutedText, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    YayaCategorySelector(category, categories) { category = it }
+                    OutlinedTextField(value = merchantName, onValueChange = { merchantName = it }, modifier = Modifier.fillMaxWidth(), label = { Text("商户") }, singleLine = true, shape = RoundedCornerShape(13.dp))
+                    OutlinedTextField(value = dateText, onValueChange = { dateText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("日期与时间") }, singleLine = true, shape = RoundedCornerShape(13.dp))
+                    OutlinedTextField(value = note, onValueChange = { note = it }, modifier = Modifier.fillMaxWidth(), label = { Text("备注（选填）") }, singleLine = true, shape = RoundedCornerShape(13.dp))
                 }
-
-                Button(
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    onClick = {
-                        val amountCents = parseAmountCents(amount)
-                        val paidAtMillis = parseDateMillis(dateText)
-                        when {
-                            amountCents == null || amountCents <= 0 -> error = "请输入大于 0 的金额"
-                            type == TransactionType.UNKNOWN -> error = "请选择收入或支出"
-                            paidAtMillis == null -> error = "时间格式应为 yyyy-MM-dd"
-                            else -> onSave(amountCents, type, category, merchantName.trim(), note.trim(), paidAtMillis)
-                        }
+            }
+        }
+        if (error.isNotBlank()) item { Text(error, color = Red, fontSize = 11.sp) }
+        item {
+            Button(
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(18.dp),
+                onClick = {
+                    val amountCents = parseAmountCents(amount)
+                    val paidAtMillis = parseDateMillis(dateText)
+                    when {
+                        amountCents == null || amountCents <= 0 -> error = "请输入大于 0 的金额"
+                        type == TransactionType.UNKNOWN -> error = "请选择收入或支出"
+                        paidAtMillis == null -> error = "时间格式应为 yyyy-MM-dd"
+                        else -> onSave(amountCents, type, category, merchantName.trim(), note.trim(), paidAtMillis)
                     }
-                ) {
-                    Text("保存")
                 }
+            ) { Text("保存账单", fontWeight = FontWeight.Bold) }
+        }
+        item { Spacer(Modifier.height(18.dp)) }
+    }
+}
+
+@Composable
+private fun YayaSegmentedChoice(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier.clip(RoundedCornerShape(10.dp)).background(if (selected) SurfaceWhite else Color.Transparent)
+            .clickable(onClick = onClick).padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = if (selected) GreenDark else MutedText, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun YayaCategorySelector(category: String, categories: List<String>, onCategoryChange: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        categories.take(6).chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                row.forEach { item ->
+                    Box(
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(999.dp))
+                            .background(if (item == category) SoftGreen else SurfaceWhite)
+                            .border(1.dp, if (item == category) GreenLight else OutlineGreen, RoundedCornerShape(999.dp))
+                            .clickable { onCategoryChange(item) }.padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(item, color = if (item == category) GreenDark else MutedText, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
+                }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -5040,32 +5925,27 @@ private fun LearningRecordsScreen(
     onToggleLearning: (MerchantCategoryLearning, Boolean) -> Unit
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        modifier = Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
             Spacer(Modifier.height(18.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButtonLike("返回", onBack)
-                Spacer(Modifier.width(12.dp))
-                Text("分类学习记录", color = PrimaryText, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            }
-            Text("来自你确认账单时填写的商户和分类，可禁用错误记录。", color = MutedText, fontSize = 13.sp)
+            YayaSecondaryHeader("商户学习记录", "管理芽芽从历史账单学到的分类", onBack)
+        }
+        item {
+            YayaInfoBanner(
+                title = "分类会越用越准",
+                message = "如果某条学习记录不准确，关闭它即可，不会删除原账单。",
+                symbol = "学"
+            )
         }
         if (learnings.isEmpty()) {
             item {
-                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                    Text(
-                        "暂无学习记录",
-                        modifier = Modifier.fillMaxWidth().padding(24.dp),
-                        color = MutedText,
-                        textAlign = TextAlign.Center
-                    )
-                }
+                YayaEmptyState("还没有学习记录", "确认带有商户名称的账单后，芽芽会在这里记住对应分类。")
             }
         } else {
             items(learnings, key = { it.id }) { learning ->
-                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = SurfaceWhite)) {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -5095,12 +5975,16 @@ private fun LearningRecordsScreen(
 
 @Composable
 private fun TextButtonLike(text: String, onClick: () -> Unit) {
-    Text(
-        text = text,
-        modifier = Modifier.clickable { onClick() }.padding(vertical = 8.dp),
-        color = Green,
-        fontWeight = FontWeight.SemiBold
-    )
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(SoftGreen)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text = text, color = GreenDark, fontWeight = FontWeight.Bold)
+    }
 }
 
 @Composable
@@ -5561,6 +6445,7 @@ private enum class MainTab {
 }
 
 private enum class AppScreen {
+    ONBOARDING,
     LEDGER,
     ADD,
     RECORD_DETAIL,
@@ -5685,13 +6570,49 @@ private const val WECHAT_PACKAGE = "com.tencent.mm"
 private const val ALIPAY_PACKAGE = "com.eg.android.AlipayGphone"
 private const val NORMAL_TEST_WINDOW_MILLIS = 30_000L
 private const val PAYMENT_TEST_WINDOW_MILLIS = 120_000L
-private const val APP_VERSION_DISPLAY = "V1.1.4"
+private const val APP_VERSION_DISPLAY = "V1.2.0"
+private const val ONBOARDING_PREFS = "yaya_onboarding"
+private const val KEY_ONBOARDING_COMPLETED = "completed"
 private val NotificationAmountRegex = Regex("""[¥￥]?\s*-?\d+(?:,\d{3})*(?:\.\d{1,2})?\s*(?:元|CNY|RMB)?""")
-private val Green = Color(0xFF1B8F5A)
-private val Red = Color(0xFFD85A50)
-private val Orange = Color(0xFFE08924)
-private val SoftGreen = Color(0xFFE5F6EC)
-private val SoftRed = Color(0xFFFDEAE7)
-private val PageBackground = Color(0xFFF7F8FA)
-private val PrimaryText = Color(0xFF20242C)
-private val MutedText = Color(0xFF77808C)
+private val Green = Color(0xFF258234)
+private val GreenDark = Color(0xFF155C24)
+private val GreenLight = Color(0xFFA8DB78)
+private val Red = Color(0xFFE26455)
+private val Orange = Color(0xFFF0A928)
+private val SoftGreen = Color(0xFFEEF7E4)
+private val SoftRed = Color(0xFFFFEFEC)
+private val SunYellow = Color(0xFFFFC43D)
+private val PageBackground = Color(0xFFF7FAF1)
+private val SurfaceWhite = Color(0xFFFFFFFF)
+private val PrimaryText = Color(0xFF1A241C)
+private val MutedText = Color(0xFF738077)
+private val OutlineGreen = Color(0xFFDEEAD7)
+
+private val YayaColorScheme = lightColorScheme(
+    primary = Green,
+    onPrimary = Color.White,
+    primaryContainer = SoftGreen,
+    onPrimaryContainer = GreenDark,
+    secondary = GreenDark,
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFDDF1C8),
+    onSecondaryContainer = GreenDark,
+    tertiary = SunYellow,
+    onTertiary = Color(0xFF4D3800),
+    error = Red,
+    background = PageBackground,
+    onBackground = PrimaryText,
+    surface = SurfaceWhite,
+    onSurface = PrimaryText,
+    surfaceVariant = SoftGreen,
+    onSurfaceVariant = MutedText,
+    outline = OutlineGreen
+)
+
+private val YayaShapes = Shapes(
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(26.dp),
+    extraLarge = RoundedCornerShape(32.dp)
+)

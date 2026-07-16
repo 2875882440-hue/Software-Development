@@ -41,4 +41,17 @@ object DailyLimitManager {
             .putString(KEY_MUTED_DATE, today)
             .apply()
     }
+
+    fun setMutedToday(
+        context: Context,
+        muted: Boolean,
+        nowMillis: Long = System.currentTimeMillis(),
+        zoneId: ZoneId = ZoneId.systemDefault()
+    ) {
+        val value = if (muted) Instant.ofEpochMilli(nowMillis).atZone(zoneId).toLocalDate().toString() else ""
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_MUTED_DATE, value)
+            .apply()
+    }
 }

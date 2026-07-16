@@ -44,7 +44,7 @@ class ProblemLogExporterTest {
             )
         )
 
-        assertTrue(log.contains("本地自动记账 - 问题日志"))
+        assertTrue(log.contains("芽芽记账 - 问题日志"))
         assertTrue(log.contains("APP版本：1.1.3"))
         assertTrue(log.contains("设备型号：HONOR HONOR 30 Pro+"))
         assertTrue(log.contains("疑似厂商系统限制后台监听"))

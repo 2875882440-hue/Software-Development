@@ -1,3 +1,5 @@
 <resources>
-    <color name="ic_launcher_background">#F7F3EA</color>
+    <color name="ic_launcher_background">#F7FAF1</color>
+    <color name="yaya_page_background">#F7FAF1</color>
+    <color name="yaya_navigation_background">#FFFFFF</color>
 </resources>
